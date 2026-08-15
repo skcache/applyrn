@@ -70,14 +70,25 @@ export class AshbyAdapter implements JobSourceAdapter {
       throw new AdapterError("rate_limited", `Ashby rate limited (429): ${url}`, 429);
     }
     if (res.status >= 500) {
-      throw new AdapterError("server_error", `Ashby server error (${res.status}): ${url}`, res.status);
+      throw new AdapterError(
+        "server_error",
+        `Ashby server error (${res.status}): ${url}`,
+        res.status,
+      );
     }
     if (!res.ok) {
-      throw new AdapterError("server_error", `Ashby unexpected status (${res.status}): ${url}`, res.status);
+      throw new AdapterError(
+        "server_error",
+        `Ashby unexpected status (${res.status}): ${url}`,
+        res.status,
+      );
     }
     const contentLength = Number(res.headers.get("content-length"));
     if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
-      throw new AdapterError("malformed", `Ashby response exceeds ${MAX_RESPONSE_BYTES} bytes: ${url}`);
+      throw new AdapterError(
+        "malformed",
+        `Ashby response exceeds ${MAX_RESPONSE_BYTES} bytes: ${url}`,
+      );
     }
     return res;
   }
@@ -111,10 +122,9 @@ export class AshbyAdapter implements JobSourceAdapter {
       // Skip malformed rows instead of failing the whole board.
       return null;
     }
-    const locations = [
-      raw.location,
-      ...(raw.secondaryLocations ?? []),
-    ].filter((l): l is string => typeof l === "string" && l.length > 0);
+    const locations = [raw.location, ...(raw.secondaryLocations ?? [])].filter(
+      (l): l is string => typeof l === "string" && l.length > 0,
+    );
 
     const compensation =
       raw.compensation?.compensationTierSummary ?? raw.compensation?.summary ?? undefined;

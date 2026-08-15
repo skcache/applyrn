@@ -6,7 +6,14 @@ import type { CompanyConfig } from "@applyrn/domain";
 import { AshbyAdapter } from "../src/ashby/ashby.js";
 
 const fixture = (name: string): unknown => {
-  const p = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "ashby", "fixtures", name);
+  const p = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "src",
+    "ashby",
+    "fixtures",
+    name,
+  );
   return JSON.parse(readFileSync(p, "utf8"));
 };
 
@@ -55,9 +62,11 @@ describe("AshbyAdapter normalize", () => {
 
   it("throws malformed on a payload without jobs array", async () => {
     const adapter = new AshbyAdapter();
-    await expect(adapter.normalize(company, fixture("board-malformed.json"))).rejects.toMatchObject({
-      code: "malformed",
-    });
+    await expect(adapter.normalize(company, fixture("board-malformed.json"))).rejects.toMatchObject(
+      {
+        code: "malformed",
+      },
+    );
   });
 
   it("skips rows without id or title instead of failing the board", async () => {
@@ -83,13 +92,19 @@ describe("AshbyAdapter fetchBoard failures", () => {
   it("maps 429 to rate_limited", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({}, 429));
     const adapter = new AshbyAdapter(fetchImpl);
-    await expect(adapter.fetchBoard(company)).rejects.toMatchObject({ code: "rate_limited", status: 429 });
+    await expect(adapter.fetchBoard(company)).rejects.toMatchObject({
+      code: "rate_limited",
+      status: 429,
+    });
   });
 
   it("maps 5xx to server_error", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({}, 502));
     const adapter = new AshbyAdapter(fetchImpl);
-    await expect(adapter.fetchBoard(company)).rejects.toMatchObject({ code: "server_error", status: 502 });
+    await expect(adapter.fetchBoard(company)).rejects.toMatchObject({
+      code: "server_error",
+      status: 502,
+    });
   });
 
   it("maps timeout to timeout", async () => {
