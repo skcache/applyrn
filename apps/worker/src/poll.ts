@@ -1,11 +1,5 @@
 import type { CompanyConfig, NormalizedJob } from "@applyrn/domain";
-import {
-  detectJobs,
-  jobOf,
-  shouldAlert,
-  shouldPersist,
-  type DetectionDecision,
-} from "@applyrn/detection";
+import { detectJobs, jobOf, shouldAlert, type DetectionDecision } from "@applyrn/detection";
 import { jobId, contentHash } from "@applyrn/domain";
 import { evaluateRelevance, type RelevanceResult } from "@applyrn/relevance";
 import {
@@ -164,21 +158,30 @@ export class PollService {
 
     // Relevance is a convenience layer, not a gate: score every alertable
     // job, persist the score + reasons, and suppress only hard mismatches.
-    const alertable: { job: NormalizedJob; relevance: RelevanceResult }[] = [];
+    const alertable: {
+      job: NormalizedJob;
+      relevance: RelevanceResult;
+      kind: "new" | "reopened";
+    }[] = [];
     for (const d of decisions) {
-      if (shouldPersist(d)) {
-        const job = jobOf(d);
-        if (job) {
-          const relevance = shouldAlert(d) ? evaluateRelevance(job) : undefined;
-          await this.persistDecision(d, job, now, relevance);
-          if (shouldAlert(d) && relevance && !relevance.suppressed) {
-            alertable.push({ job, relevance });
-          }
-        }
-      } else if (d.kind === "unchanged") {
-        await this.repo.touchJobSeen(d.externalJobId, company.id, now);
-      } else if (d.kind === "missing") {
+      // Missing decisions carry no job: they must be dispatched BEFORE the
+      // persist branch, which is keyed on jobOf(d) being non-null. Doing it
+      // the other way silently dropped them (audit F3) and the inactive
+      // lifecycle never advanced, so reposted jobs never re-alerted.
+      if (d.kind === "missing") {
         await this.repo.markJobAbsent(d.externalJobId, company.id, d.absentCount, now);
+        continue;
+      }
+      if (d.kind === "unchanged") {
+        await this.repo.touchJobSeen(d.externalJobId, company.id, now);
+        continue;
+      }
+      const job = jobOf(d);
+      if (!job) continue;
+      const relevance = shouldAlert(d) ? evaluateRelevance(job) : undefined;
+      await this.persistDecision(d, job, now, relevance);
+      if (shouldAlert(d) && relevance && !relevance.suppressed) {
+        alertable.push({ job, relevance, kind: d.kind === "reopened" ? "reopened" : "new" });
       }
     }
 
@@ -262,7 +265,7 @@ export class PollService {
   /** Send alerts for new/reopened jobs. Failures persist as undelivered. */
   private async notifyNew(
     company: CompanyConfig,
-    jobs: { job: NormalizedJob; relevance: RelevanceResult }[],
+    jobs: { job: NormalizedJob; relevance: RelevanceResult; kind: "new" | "reopened" }[],
     now: string,
   ): Promise<number> {
     const token = this.env.TELEGRAM_BOT_TOKEN;
@@ -284,7 +287,7 @@ export class PollService {
 
     const client = new TelegramClient(token);
     let sent = 0;
-    for (const { job, relevance } of jobs) {
+    for (const { job, relevance, kind } of jobs) {
       const id = await jobId(job.provider, job.companyId, job.externalJobId);
 
       // Duplicate-send guard: if a delivered notification row already exists
@@ -297,6 +300,7 @@ export class PollService {
         company,
         detectedAt: now,
         match: { score: relevance.score, reasons: relevance.reasons },
+        kind,
       });
       const payload = buildSendMessagePayload(chatId, text, alertButtons(job));
       try {

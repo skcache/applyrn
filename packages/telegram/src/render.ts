@@ -8,6 +8,8 @@ export type RenderAlertInput = {
   company: CompanyConfig;
   detectedAt: string;
   match?: MatchInfo;
+  /** Alert flavor: reopened jobs render REOPENED, everything else NEW. */
+  kind?: "new" | "reopened";
 };
 
 /**
@@ -16,10 +18,11 @@ export type RenderAlertInput = {
  * observed kind shows First seen.
  */
 export function renderAlertText(input: RenderAlertInput): string {
-  const { job, company, detectedAt, match } = input;
+  const { job, company, detectedAt, match, kind } = input;
   const lines: string[] = [];
 
-  const header = match ? `\u{1F6A8} NEW \u2014 ${match.score} MATCH` : "\u{1F6A8} NEW JOB";
+  const tag = kind === "reopened" ? "REOPENED" : "NEW";
+  const header = match ? `\u{1F6A8} ${tag} \u2014 ${match.score} MATCH` : `\u{1F6A8} ${tag} JOB`;
   lines.push(header, "");
 
   lines.push(job.title);

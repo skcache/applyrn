@@ -73,6 +73,18 @@ describe("renderAlertText", () => {
     expect(text).toContain("✓ Python");
   });
 
+  it("renders REOPENED for reopened alerts", () => {
+    const text = renderAlertText({
+      job,
+      company,
+      detectedAt: "2026-08-14T17:14:31Z",
+      match: { score: 70, reasons: ["Internship"] },
+      kind: "reopened",
+    });
+    expect(text).toContain("🚨 REOPENED — 70 MATCH");
+    expect(text).not.toContain("🚨 NEW");
+  });
+
   it("never fabricates age for unknown timestamps", () => {
     expect(formatAge("not-a-date", "2026-08-14T17:14:31Z")).toBe("unknown");
   });

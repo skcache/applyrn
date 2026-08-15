@@ -396,6 +396,64 @@ describe("failure isolation and backoff", () => {
   });
 });
 
+describe("inactive/reopen lifecycle", () => {
+  it("marks a job inactive after 2 consecutive absences", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline: 3 jobs persisted
+    expect(await countRows("jobs")).toBe(3);
+
+    // Board drops one job: first absence.
+    const reduced = jobs.filter((j) => j.id !== 70001);
+    stubBoard({ jobs: reduced });
+    await backdateSource();
+    const one = await pollCompany("example-ai");
+    expect(one.outcome.ok).toBe(true);
+    let row = await rows("jobs", "external_job_id = '70001'");
+    expect(row[0]!.absent_count).toBe(1);
+    expect(row[0]!.status).not.toBe("inactive");
+
+    // Second consecutive absence: inactive.
+    await backdateSource();
+    const two = await pollCompany("example-ai");
+    expect(two.outcome.ok).toBe(true);
+    row = await rows("jobs", "external_job_id = '70001'");
+    expect(row[0]!.absent_count).toBe(2);
+    expect(row[0]!.status).toBe("inactive");
+    expect(row[0]!.confirmed_inactive_at).toBeTruthy();
+  });
+
+  it("re-alerts a reposted job that went inactive (reopened)", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline
+
+    // Two absences => inactive.
+    const reduced = jobs.filter((j) => j.id !== 70002);
+    stubBoard({ jobs: reduced });
+    await backdateSource();
+    await pollCompany("example-ai");
+    await backdateSource();
+    await pollCompany("example-ai");
+    const inactive = await rows("jobs", "external_job_id = '70002'");
+    expect(inactive[0]!.status).toBe("inactive");
+
+    // Job reposted: must alert again (reopened).
+    const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubTelegram({ capture: calls });
+    stubBoard({ jobs });
+    await backdateSource();
+    const { outcome } = await pollCompany("example-ai");
+    expect(outcome.ok).toBe(true);
+    expect(outcome.newJobs).toBe(1);
+    expect(outcome.alertsSent).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.text).toContain("REOPENED");
+    const reopened = await rows("jobs", "external_job_id = '70002'");
+    expect(reopened[0]!.status).toBe("reopened");
+  });
+});
+
 describe("poll interval enforcement", () => {
   it("skips a company polled too recently (not_due)", async () => {
     stubBoard({ jobs });
