@@ -7,8 +7,7 @@ open-source boundary.
 
 ## The open-source boundary (read this first)
 
-This repository is public. Read `OPEN_SOURCE_BOUNDARY.md` before touching any
-code. In short:
+This repository is public. Never commit real secrets or personal data. In short:
 
 - **Public-safe:** engine code, adapters, migrations, dashboard, tests,
   sanitized fixtures, example config, docs, CI.

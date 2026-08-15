@@ -20,8 +20,6 @@ ApplyRN intentionally separates public source code from private runtime state:
   the real company watchlist, personal application history, production D1 data,
   `.dev.vars` / `.env` files, database dumps, and any identifying personal data.
 
-See `OPEN_SOURCE_BOUNDARY.md` for the full boundary contract.
-
 ## Secret handling
 
 - All secrets live in Cloudflare Worker secrets or local `.dev.vars` /
