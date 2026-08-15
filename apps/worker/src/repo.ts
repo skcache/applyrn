@@ -333,6 +333,24 @@ export class D1Repository {
     }));
   }
 
+  /** Read the latest notification row for a job/channel (duplicate-send guard). */
+  async getNotification(jobId: string, channel: string): Promise<NotificationRecord | null> {
+    const row = await this.db
+      .prepare("SELECT * FROM notifications WHERE job_id = ? AND channel = ?")
+      .bind(jobId, channel)
+      .first();
+    if (!row) return null;
+    return {
+      id: Number(row.id),
+      jobId: String(row.job_id),
+      channel: String(row.channel),
+      attemptedAt: String(row.attempted_at),
+      delivered: Number(row.delivered) === 1,
+      latencyMs: row.latency_ms !== null ? Number(row.latency_ms) : undefined,
+      errorCode: row.error_code ? String(row.error_code) : undefined,
+    };
+  }
+
   async getJobById(jobId: string): Promise<JobRecord | null> {
     const row = await this.db.prepare("SELECT * FROM jobs WHERE id = ?").bind(jobId).first();
     return row ? rowToJob(row) : null;

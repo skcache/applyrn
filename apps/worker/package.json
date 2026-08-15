@@ -11,7 +11,10 @@
     "db:migrate:local": "wrangler d1 migrations apply applyrn --local"
   },
   "dependencies": {
-    "@applyrn/domain": "workspace:*"
+    "@applyrn/adapters": "workspace:*",
+    "@applyrn/detection": "workspace:*",
+    "@applyrn/domain": "workspace:*",
+    "@applyrn/telegram": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.3",

@@ -17,6 +17,7 @@ export default defineConfig({
             // Synthetic test-only values. Never real secrets in the repo.
             TELEGRAM_BOT_TOKEN: "test-bot-token-000",
             TELEGRAM_CHAT_ID: "000000000",
+            DASHBOARD_TOKEN: "test-dashboard-token-000",
           },
         },
       };
