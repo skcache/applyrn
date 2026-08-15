@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@applyrn/domain": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
