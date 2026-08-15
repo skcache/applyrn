@@ -1,11 +1,12 @@
-import type {
-  ApplicationRecord,
-  ApplicationStatus,
-  CompanyConfig,
-  JobRecord,
-  JobStatus,
-  NotificationRecord,
-  SourceState,
+import {
+  DEFAULT_POLL_INTERVAL_SECONDS,
+  type ApplicationRecord,
+  type ApplicationStatus,
+  type CompanyConfig,
+  type JobRecord,
+  type JobStatus,
+  type NotificationRecord,
+  type SourceState,
 } from "@applyrn/domain";
 
 /**
@@ -14,6 +15,50 @@ import type {
  */
 
 export type D1Row = Record<string, unknown>;
+
+/** Job + company + application, for the dashboard tape and detail view. */
+export type JobView = JobRecord & {
+  companyName: string;
+  applicationStatus?: ApplicationStatus;
+  applicationAppliedAt?: string;
+};
+
+/** Company + source health row, for the dashboard SOURCES view. */
+export type SourceHealthView = {
+  companyId: string;
+  name: string;
+  provider: string;
+  boardKey: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  failureStreak: number;
+  backoffUntil?: string;
+  lastHttpStatus?: number;
+  lastErrorCode?: string;
+};
+
+/** Application + job + company, for the dashboard APPLICATIONS view. */
+export type ApplicationView = ApplicationRecord & {
+  jobTitle: string;
+  jobDetectedAt: string;
+  jobProvider: string;
+  companyName: string;
+};
+
+function rowToJobView(row: D1Row): JobView {
+  return {
+    ...rowToJob(row),
+    companyName: String(row.company_name),
+    applicationStatus: row.application_status
+      ? (String(row.application_status) as ApplicationStatus)
+      : undefined,
+    applicationAppliedAt: row.application_applied_at
+      ? String(row.application_applied_at)
+      : undefined,
+  };
+}
 
 function rowToCompany(row: D1Row): CompanyConfig {
   return {
@@ -126,6 +171,118 @@ export class D1Repository {
       .bind(limit)
       .all();
     return results.map(rowToJob);
+  }
+
+  /** Job + company name + application status, for the dashboard tape. */
+  async listJobViews(limit = 100): Promise<JobView[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT j.*, c.name AS company_name, a.status AS application_status, a.applied_at AS application_applied_at
+         FROM jobs j
+         JOIN companies c ON c.id = j.company_id
+         LEFT JOIN applications a ON a.job_id = j.id
+         ORDER BY j.first_seen_at DESC
+         LIMIT ?`,
+      )
+      .bind(limit)
+      .all();
+    return results.map(rowToJobView);
+  }
+
+  async getJobView(id: string): Promise<JobView | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT j.*, c.name AS company_name, a.status AS application_status, a.applied_at AS application_applied_at
+         FROM jobs j
+         JOIN companies c ON c.id = j.company_id
+         LEFT JOIN applications a ON a.job_id = j.id
+         WHERE j.id = ?`,
+      )
+      .bind(id)
+      .first();
+    return row ? rowToJobView(row) : null;
+  }
+
+  /** Companies + source health, for the dashboard SOURCES view. */
+  async listSourceHealth(): Promise<SourceHealthView[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT c.id, c.name, c.provider, c.board_key, c.enabled, c.poll_interval_seconds,
+                s.last_success_at, s.last_failure_at, s.failure_streak, s.backoff_until,
+                s.last_http_status, s.last_error_code
+         FROM companies c
+         LEFT JOIN source_state s ON s.company_id = c.id
+         ORDER BY c.name`,
+      )
+      .all();
+    return results.map((row) => ({
+      companyId: String(row.id),
+      name: String(row.name),
+      provider: String(row.provider),
+      boardKey: String(row.board_key),
+      enabled: Number(row.enabled) === 1,
+      pollIntervalSeconds: Number(row.poll_interval_seconds),
+      lastSuccessAt: row.last_success_at ? String(row.last_success_at) : undefined,
+      lastFailureAt: row.last_failure_at ? String(row.last_failure_at) : undefined,
+      failureStreak: Number(row.failure_streak ?? 0),
+      backoffUntil: row.backoff_until ? String(row.backoff_until) : undefined,
+      lastHttpStatus:
+        row.last_http_status !== null && row.last_http_status !== undefined
+          ? Number(row.last_http_status)
+          : undefined,
+      lastErrorCode: row.last_error_code ? String(row.last_error_code) : undefined,
+    }));
+  }
+
+  /** System status: enabled company count, cadence, last successful poll. */
+  async getSystemStatus(): Promise<{
+    companyCount: number;
+    cadenceSeconds: number;
+    lastPollAt?: string;
+  }> {
+    const count = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM companies WHERE enabled = 1")
+      .first();
+    const cadence = await this.db
+      .prepare("SELECT MIN(poll_interval_seconds) AS c FROM companies WHERE enabled = 1")
+      .first();
+    const last = await this.db.prepare("SELECT MAX(finished_at) AS t FROM poll_metrics").first();
+    return {
+      companyCount: Number(count?.n ?? 0),
+      cadenceSeconds: Number(cadence?.c ?? DEFAULT_POLL_INTERVAL_SECONDS),
+      lastPollAt: last?.t ? String(last.t) : undefined,
+    };
+  }
+
+  /** Applications joined with job + company, for the APPLICATIONS view. */
+  async listApplicationViews(): Promise<ApplicationView[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT a.*, j.title AS job_title, j.detected_at AS job_detected_at,
+                j.provider AS job_provider, c.name AS company_name
+         FROM applications a
+         JOIN jobs j ON j.id = a.job_id
+         JOIN companies c ON c.id = j.company_id
+         ORDER BY a.applied_at IS NULL, a.applied_at DESC, j.detected_at DESC`,
+      )
+      .all();
+    return results.map((row) => ({
+      jobId: String(row.job_id),
+      status: String(row.status) as ApplicationStatus,
+      savedAt: row.saved_at ? String(row.saved_at) : undefined,
+      appliedAt: row.applied_at ? String(row.applied_at) : undefined,
+      oaAt: row.oa_at ? String(row.oa_at) : undefined,
+      interviewAt: row.interview_at ? String(row.interview_at) : undefined,
+      finalAt: row.final_at ? String(row.final_at) : undefined,
+      offerAt: row.offer_at ? String(row.offer_at) : undefined,
+      rejectedAt: row.rejected_at ? String(row.rejected_at) : undefined,
+      ghostedAt: row.ghosted_at ? String(row.ghosted_at) : undefined,
+      notes: row.notes ? String(row.notes) : undefined,
+      jobTitle: String(row.job_title),
+      jobDetectedAt: String(row.job_detected_at),
+      jobProvider: String(row.job_provider),
+      companyName: String(row.company_name),
+    }));
   }
 
   async upsertJob(job: JobRecord): Promise<void> {
@@ -408,6 +565,57 @@ export class D1Repository {
         app.notes ?? null,
       )
       .run();
+  }
+
+  /**
+   * Set an application status, stamping the corresponding timestamp column
+   * (PRD 8.3). Previously set timestamps are preserved, so moving from
+   * APPLIED to INTERVIEW keeps applied_at.
+   */
+  async setApplicationStatus(jobId: string, status: ApplicationStatus, now: string): Promise<void> {
+    const existing = await this.getApplication(jobId);
+    const base: ApplicationRecord = {
+      jobId,
+      status,
+      savedAt: existing?.savedAt,
+      appliedAt: existing?.appliedAt,
+      oaAt: existing?.oaAt,
+      interviewAt: existing?.interviewAt,
+      finalAt: existing?.finalAt,
+      offerAt: existing?.offerAt,
+      rejectedAt: existing?.rejectedAt,
+      ghostedAt: existing?.ghostedAt,
+      notes: existing?.notes,
+    };
+    switch (status) {
+      case "SAVED":
+        base.savedAt ??= now;
+        break;
+      case "APPLIED":
+        base.appliedAt ??= now;
+        break;
+      case "OA":
+        base.oaAt ??= now;
+        break;
+      case "INTERVIEW":
+        base.interviewAt ??= now;
+        break;
+      case "FINAL":
+        base.finalAt ??= now;
+        break;
+      case "OFFER":
+        base.offerAt ??= now;
+        break;
+      case "REJECTED":
+        base.rejectedAt ??= now;
+        break;
+      case "GHOSTED":
+        base.ghostedAt ??= now;
+        break;
+      case "DETECTED":
+        break;
+    }
+    await this.upsertApplication(base);
   }
 
   async insertPollMetric(m: {

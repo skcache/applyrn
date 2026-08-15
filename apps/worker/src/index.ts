@@ -1,5 +1,6 @@
 import { AshbyAdapter, GreenhouseAdapter, LeverAdapter } from "@applyrn/adapters";
 import type { JobSourceAdapter } from "@applyrn/adapters";
+import type { ApplicationStatus } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
 import { PollService, type WorkerEnv } from "./poll.js";
 import { PollScheduler } from "./scheduler.js";
@@ -51,8 +52,71 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/jobs") {
       if (!isAuthorized(request, env)) return unauthorized();
-      const jobs = await repo.listJobs(50);
+      const jobs = await repo.listJobViews(50);
       return Response.json({ jobs }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/jobs/")) {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const id = url.pathname.slice("/api/jobs/".length);
+      const job = await repo.getJobView(id);
+      if (!job) {
+        return Response.json({ error: "unknown job" }, { status: 404, headers: JSON_HEADERS });
+      }
+      return Response.json({ job }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/sources") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const sources = await repo.listSourceHealth();
+      return Response.json({ sources }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/status") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const status = await repo.getSystemStatus();
+      return Response.json({ status }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/applications") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const applications = await repo.listApplicationViews();
+      return Response.json({ applications }, { headers: JSON_HEADERS });
+    }
+
+    if (
+      request.method === "PUT" &&
+      url.pathname.startsWith("/api/jobs/") &&
+      url.pathname.endsWith("/application")
+    ) {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const id = url.pathname.slice("/api/jobs/".length, -"/application".length);
+      const body = (await request.json().catch(() => ({}))) as { status?: string };
+      const status = body.status?.toUpperCase();
+      const valid: string[] = [
+        "DETECTED",
+        "SAVED",
+        "APPLIED",
+        "OA",
+        "INTERVIEW",
+        "FINAL",
+        "OFFER",
+        "REJECTED",
+        "GHOSTED",
+      ];
+      if (!status || !valid.includes(status)) {
+        return Response.json(
+          { error: `invalid status, expected one of ${valid.join(", ")}` },
+          { status: 400, headers: JSON_HEADERS },
+        );
+      }
+      const job = await repo.getJobById(id);
+      if (!job) {
+        return Response.json({ error: "unknown job" }, { status: 404, headers: JSON_HEADERS });
+      }
+      await repo.setApplicationStatus(id, status as ApplicationStatus, new Date().toISOString());
+      const app = await repo.getApplication(id);
+      return Response.json({ application: app }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "POST" && url.pathname === "/api/poll") {
