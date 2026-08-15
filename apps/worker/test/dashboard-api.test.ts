@@ -210,6 +210,61 @@ describe("GET /api/status", () => {
   });
 });
 
+describe("PUT /api/jobs/:id/application", () => {
+  const put = (id: string, body: unknown, headers: Record<string, string> = AUTH_HEADER) =>
+    exports.default
+      .fetch(`https://applyrn-worker.test/api/jobs/${id}/application`, {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      .then(async (r) => ({ status: r.status, body: (await r.json()) as Record<string, unknown> }));
+
+  it("sets a status and stamps the corresponding timestamp", async () => {
+    const id = await seedJob();
+    const res = await put(id, { status: "APPLIED" });
+    expect(res.status).toBe(200);
+    const app = res.body.application as { status: string; appliedAt: string };
+    expect(app.status).toBe("APPLIED");
+    expect(app.appliedAt).toBeTruthy();
+
+    // The tape view now reflects the application.
+    const jobs = await get("/api/jobs");
+    const first = (
+      jobs.body.jobs as { applicationStatus: string; applicationAppliedAt: string }[]
+    )[0]!;
+    expect(first.applicationStatus).toBe("APPLIED");
+    expect(first.applicationAppliedAt).toBeTruthy();
+  });
+
+  it("preserves applied_at when moving to a later status", async () => {
+    const id = await seedJob();
+    await put(id, { status: "APPLIED" });
+    const before = await repo().getApplication(id);
+    await put(id, { status: "INTERVIEW" });
+    const after = await repo().getApplication(id);
+    expect(after!.status).toBe("INTERVIEW");
+    expect(after!.appliedAt).toBe(before!.appliedAt);
+    expect(after!.interviewAt).toBeTruthy();
+  });
+
+  it("rejects invalid statuses with 400", async () => {
+    const id = await seedJob();
+    const res = await put(id, { status: "NOT_A_STATUS" });
+    expect(res.status).toBe(400);
+  });
+
+  it("404s for an unknown job", async () => {
+    const res = await put("nope", { status: "APPLIED" });
+    expect(res.status).toBe(404);
+  });
+
+  it("requires auth", async () => {
+    const res = await put("job-1", { status: "APPLIED" }, NO_AUTH);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("GET /api/applications", () => {
   it("returns applications joined with job and company", async () => {
     await seedJob();

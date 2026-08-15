@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import {
+  APPLICATION_STATUSES,
   ageLabel,
   api,
   clearToken,
   getToken,
   matchReasons,
   setToken,
+  type ApplicationStatus,
+  type ApplicationView,
   type JobView,
   type SourceHealth,
 } from "./api";
@@ -15,7 +18,99 @@ import {
  * Dark graphite canvas, large type, hairline separators, minimal chrome.
  */
 
-type View = "live" | "sources";
+type View = "live" | "applications" | "sources";
+
+/** Small status dropdown used in tape rows and the detail view. */
+function StatusSelect({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (status: ApplicationStatus) => void;
+}) {
+  return (
+    <select
+      value={value ?? "DETECTED"}
+      onChange={(e) => onChange(e.target.value as ApplicationStatus)}
+      onClick={(e) => e.stopPropagation()}
+      className="border border-zinc-800 bg-[#0c0e11] px-1.5 py-0.5 text-xs text-zinc-300 focus:border-zinc-600 focus:outline-none"
+    >
+      {APPLICATION_STATUSES.map((s) => (
+        <option key={s} value={s}>
+          {s}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Applications({
+  applications,
+  onStatus,
+}: {
+  applications: ApplicationView[];
+  onStatus: (jobId: string, status: ApplicationStatus) => void;
+}) {
+  return (
+    <div className="border border-zinc-800">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left">
+            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Company
+            </th>
+            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Role
+            </th>
+            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Status
+            </th>
+            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Detected
+            </th>
+            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Applied
+            </th>
+            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Detection → applied
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {applications.map((app) => {
+            const latency =
+              app.appliedAt && app.jobDetectedAt
+                ? ageLabel(app.jobDetectedAt, Date.parse(app.appliedAt))
+                : "—";
+            return (
+              <tr key={app.jobId} className="border-t border-zinc-800/70">
+                <td className="px-4 py-2.5 text-zinc-300">{app.companyName}</td>
+                <td className="px-4 py-2.5 text-zinc-100">{app.jobTitle}</td>
+                <td className="px-4 py-2.5">
+                  <StatusSelect value={app.status} onChange={(s) => onStatus(app.jobId, s)} />
+                </td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">
+                  {new Date(app.jobDetectedAt).toLocaleString()}
+                </td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">
+                  {app.appliedAt ? new Date(app.appliedAt).toLocaleString() : "—"}
+                </td>
+                <td className="px-4 py-2.5 font-mono text-xs text-zinc-500">{latency}</td>
+              </tr>
+            );
+          })}
+          {applications.length === 0 && (
+            <tr>
+              <td colSpan={6} className="px-4 py-10 text-center text-sm text-zinc-600">
+                Nothing tracked yet. Set a status on any job in the tape.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -143,10 +238,12 @@ function Detail({
   job,
   onBack,
   onOpen,
+  onStatus,
 }: {
   job: JobView;
   onBack: () => void;
   onOpen: (url: string) => void;
+  onStatus: (status: ApplicationStatus) => void;
 }) {
   const reasons = matchReasons(job);
   const rows: [string, string][] = [];
@@ -161,8 +258,8 @@ function Detail({
   if (job.publicationTimeKind === "authoritative" && job.sourcePublishedAt) {
     rows.push(["Published", new Date(job.sourcePublishedAt).toLocaleString()]);
   }
-  if (job.applicationStatus && job.applicationStatus !== "DETECTED") {
-    rows.push(["Application", job.applicationStatus]);
+  if (job.applicationAppliedAt) {
+    rows.push(["Applied", new Date(job.applicationAppliedAt).toLocaleString()]);
   }
 
   return (
@@ -201,19 +298,25 @@ function Detail({
         {job.descriptionPlain && (
           <p className="mt-5 max-w-2xl text-sm leading-6 text-zinc-400">{job.descriptionPlain}</p>
         )}
-        <div className="mt-6 flex gap-3">
-          <button
-            onClick={() => onOpen(job.applyUrl)}
-            className="border border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-100 hover:border-zinc-400 hover:text-white transition-colors"
-          >
-            APPLY NOW
-          </button>
-          <button
-            onClick={() => onOpen(job.jobUrl)}
-            className="border border-zinc-800 px-4 py-2 text-sm text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 transition-colors"
-          >
-            DETAILS
-          </button>
+        <div className="mt-6 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-zinc-500">Status</span>
+            <StatusSelect value={job.applicationStatus} onChange={onStatus} />
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => onOpen(job.applyUrl)}
+              className="border border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-100 hover:border-zinc-400 hover:text-white transition-colors"
+            >
+              APPLY NOW
+            </button>
+            <button
+              onClick={() => onOpen(job.jobUrl)}
+              className="border border-zinc-800 px-4 py-2 text-sm text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 transition-colors"
+            >
+              DETAILS
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -292,6 +395,17 @@ export function App() {
   const jobs = useData(() => api.jobs(), [authed]);
   const sources = useData(() => api.sources(), [authed]);
   const status = useData(() => api.status(), [authed]);
+  const applications = useData(() => api.applications(), [authed, view === "applications"]);
+
+  const setStatus = async (jobId: string, s: ApplicationStatus) => {
+    try {
+      await api.setApplicationStatus(jobId, s);
+      applications.reload();
+      jobs.reload();
+    } catch {
+      // Surface silently; next reload shows the server truth.
+    }
+  };
 
   if (!authed) {
     return <Gate onAuthed={() => setAuthed(true)} />;
@@ -320,6 +434,15 @@ export function App() {
               className={`uppercase tracking-wide ${view === "live" ? "text-zinc-100" : "hover:text-zinc-300"}`}
             >
               Live
+            </button>
+            <button
+              onClick={() => {
+                setView("applications");
+                setSelected(null);
+              }}
+              className={`uppercase tracking-wide ${view === "applications" ? "text-zinc-100" : "hover:text-zinc-300"}`}
+            >
+              Applications
             </button>
             <button
               onClick={() => {
@@ -394,7 +517,21 @@ export function App() {
             </div>
           )}
           {view === "live" && selected && (
-            <Detail job={selected} onBack={() => setSelected(null)} onOpen={open} />
+            <Detail
+              job={selected}
+              onBack={() => setSelected(null)}
+              onOpen={open}
+              onStatus={(s) => {
+                setSelected({ ...selected, applicationStatus: s });
+                void setStatus(selected.id, s);
+              }}
+            />
+          )}
+          {view === "applications" && (
+            <Applications
+              applications={applications.data?.applications ?? []}
+              onStatus={setStatus}
+            />
           )}
           {view === "sources" && <Sources sources={sources.data?.sources ?? []} />}
         </main>

@@ -97,12 +97,31 @@ export type ApplicationView = {
   companyName: string;
 };
 
+export const APPLICATION_STATUSES = [
+  "DETECTED",
+  "SAVED",
+  "APPLIED",
+  "OA",
+  "INTERVIEW",
+  "FINAL",
+  "OFFER",
+  "REJECTED",
+  "GHOSTED",
+] as const;
+
+export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
+
 export const api = {
   jobs: () => request<{ jobs: JobView[] }>("/jobs"),
   job: (id: string) => request<{ job: JobView }>(`/jobs/${encodeURIComponent(id)}`),
   sources: () => request<{ sources: SourceHealth[] }>("/sources"),
   status: () => request<{ status: SystemStatus }>("/status"),
   applications: () => request<{ applications: ApplicationView[] }>("/applications"),
+  setApplicationStatus: (jobId: string, status: ApplicationStatus) =>
+    request<{ application: { status: string; appliedAt?: string } }>(
+      `/jobs/${encodeURIComponent(jobId)}/application`,
+      { method: "PUT", body: JSON.stringify({ status }) },
+    ),
 };
 
 export function matchReasons(job: JobView): string[] {

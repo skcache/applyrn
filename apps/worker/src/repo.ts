@@ -567,6 +567,57 @@ export class D1Repository {
       .run();
   }
 
+  /**
+   * Set an application status, stamping the corresponding timestamp column
+   * (PRD 8.3). Previously set timestamps are preserved, so moving from
+   * APPLIED to INTERVIEW keeps applied_at.
+   */
+  async setApplicationStatus(jobId: string, status: ApplicationStatus, now: string): Promise<void> {
+    const existing = await this.getApplication(jobId);
+    const base: ApplicationRecord = {
+      jobId,
+      status,
+      savedAt: existing?.savedAt,
+      appliedAt: existing?.appliedAt,
+      oaAt: existing?.oaAt,
+      interviewAt: existing?.interviewAt,
+      finalAt: existing?.finalAt,
+      offerAt: existing?.offerAt,
+      rejectedAt: existing?.rejectedAt,
+      ghostedAt: existing?.ghostedAt,
+      notes: existing?.notes,
+    };
+    switch (status) {
+      case "SAVED":
+        base.savedAt ??= now;
+        break;
+      case "APPLIED":
+        base.appliedAt ??= now;
+        break;
+      case "OA":
+        base.oaAt ??= now;
+        break;
+      case "INTERVIEW":
+        base.interviewAt ??= now;
+        break;
+      case "FINAL":
+        base.finalAt ??= now;
+        break;
+      case "OFFER":
+        base.offerAt ??= now;
+        break;
+      case "REJECTED":
+        base.rejectedAt ??= now;
+        break;
+      case "GHOSTED":
+        base.ghostedAt ??= now;
+        break;
+      case "DETECTED":
+        break;
+    }
+    await this.upsertApplication(base);
+  }
+
   async insertPollMetric(m: {
     provider: string;
     shard: string;
