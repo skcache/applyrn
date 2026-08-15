@@ -320,9 +320,7 @@ describe("Telegram failure recovery", () => {
     // RETRY_MIN_INTERVAL_MS (5 min) but keep it under RETRY_MAX_AGE_MS (24h):
     // a fixed historical date would go stale as the real clock advances.
     const aged = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    await env.DB.exec(
-      `UPDATE notifications SET attempted_at = '${aged}' WHERE delivered = 0`,
-    );
+    await env.DB.exec(`UPDATE notifications SET attempted_at = '${aged}' WHERE delivered = 0`);
     stubTelegram();
     await pollAll();
     const retried = await rows("notifications", "1=1");
