@@ -260,6 +260,12 @@ export class PollService {
               : "active",
       absentCount: 0,
     });
+
+    // A reopened job is a NEW posting: the old delivered notification row
+    // (from the first run) must not suppress the fresh alert (audit F4).
+    if (isReopen) {
+      await this.repo.resetNotificationDelivery(id, "telegram");
+    }
   }
 
   /** Send alerts for new/reopened jobs. Failures persist as undelivered. */

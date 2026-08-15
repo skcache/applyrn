@@ -475,6 +475,21 @@ export class D1Repository {
       .run();
   }
 
+  /**
+   * Clear the delivered flag for a job/channel (audit F4). Used when a job
+   * reopens or its content changes: the old delivered row must not suppress
+   * a fresh alert for the new posting.
+   */
+  async resetNotificationDelivery(jobId: string, channel: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE notifications SET delivered = 0, error_code = 'superseded'
+         WHERE job_id = ? AND channel = ? AND delivered = 1`,
+      )
+      .bind(jobId, channel)
+      .run();
+  }
+
   async listUndeliveredNotifications(): Promise<NotificationRecord[]> {
     const { results } = await this.db
       .prepare("SELECT * FROM notifications WHERE delivered = 0 ORDER BY attempted_at")

@@ -452,6 +452,57 @@ describe("inactive/reopen lifecycle", () => {
     const reopened = await rows("jobs", "external_job_id = '70002'");
     expect(reopened[0]!.status).toBe("reopened");
   });
+
+  it("reopens even when an earlier delivered notification row exists", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline
+
+    // A NEW job is detected and alerted: delivered row exists.
+    const extra = {
+      id: 70011,
+      title: "Reopen Intern",
+      location: { name: "Austin" },
+      absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70011",
+      updated_at: "2026-08-14T22:00:00Z",
+    };
+    const firstCalls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubBoard({ jobs: [...jobs, extra] });
+    stubTelegram({ capture: firstCalls });
+    await backdateSource();
+    const first = await pollCompany("example-ai");
+    expect(first.outcome.alertsSent).toBe(1);
+    expect(firstCalls).toHaveLength(1);
+    expect(firstCalls[0]!.text).toContain("🚨 NEW");
+    const notifs = await rows("notifications", "1=1");
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0]!.delivered).toBe(1);
+
+    // Job leaves the board, then is reposted after going inactive.
+    const without = jobs.filter((j) => j.id !== 70011);
+    stubBoard({ jobs: without });
+    await backdateSource();
+    await pollCompany("example-ai");
+    await backdateSource();
+    await pollCompany("example-ai");
+    const gone = await rows("jobs", "external_job_id = '70011'");
+    expect(gone[0]!.status).toBe("inactive");
+
+    // Reposted: the old delivered row must NOT suppress the reopen alert.
+    const reopenCalls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubBoard({ jobs: [...jobs, extra] });
+    stubTelegram({ capture: reopenCalls });
+    await backdateSource();
+    const reopened = await pollCompany("example-ai");
+    expect(reopened.outcome.ok).toBe(true);
+    expect(reopened.outcome.alertsSent).toBe(1);
+    expect(reopenCalls).toHaveLength(1);
+    expect(reopenCalls[0]!.text).toContain("🚨 REOPENED");
+    const after = await rows("notifications", "1=1");
+    expect(after).toHaveLength(1); // one row per (job, channel), re-delivered
+    expect(after[0]!.delivered).toBe(1);
+    expect(after[0]!.error_code).toBeNull();
+  });
 });
 
 describe("poll interval enforcement", () => {
