@@ -17,16 +17,38 @@ import { PollScheduler } from "./scheduler.js";
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 /**
- * V0 access control (PRD 14): a single shared token. When DASHBOARD_TOKEN is
- * set, mutating/data endpoints require `Authorization: Bearer <token>`.
- * When unset (local dev), endpoints stay open. This is deliberately NOT a
- * full auth product.
+ * V0 access control (PRD 14): a single shared token. Data/mutating
+ * endpoints require `Authorization: Bearer <DASHB...N>`.
+ *
+ * FAIL-CLOSED: when DASHBOARD_TOKEN is unset the API is locked, not open.
+ * Local development must set DASHBOARD_TOKEN in .dev.vars; production
+ * provisioning lives in .github/workflows/deploy.yml. This deliberately
+ * prevents an accidental wide-open deploy (previously the default).
  */
-function isAuthorized(request: Request, env: WorkerEnv): boolean {
+async function isAuthorized(request: Request, env: WorkerEnv): Promise<boolean> {
   const token = env.DASHBOARD_TOKEN;
-  if (!token) return true;
+  if (!token) return false;
   const header = request.headers.get("authorization") ?? "";
-  return header === `Bearer ${token}`;
+  if (!header.startsWith("Bearer ")) return false;
+  return safeEqual(header.slice("Bearer ".length), token);
+}
+
+/**
+ * Constant-time string comparison via SHA-256 digests. Both sides are
+ * hashed so length differences leak nothing, then the digests are
+ * compared with a branch-free XOR loop.
+ */
+async function safeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const x = new Uint8Array(da);
+  const y = new Uint8Array(db);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i]! ^ y[i]!;
+  return diff === 0;
 }
 
 function unauthorized(): Response {
@@ -51,13 +73,13 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/api/jobs") {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const jobs = await repo.listJobViews(50);
       return Response.json({ jobs }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/api/jobs/")) {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const id = url.pathname.slice("/api/jobs/".length);
       const job = await repo.getJobView(id);
       if (!job) {
@@ -67,19 +89,19 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/api/sources") {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const sources = await repo.listSourceHealth();
       return Response.json({ sources }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "GET" && url.pathname === "/api/status") {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const status = await repo.getSystemStatus();
       return Response.json({ status }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "GET" && url.pathname === "/api/applications") {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const applications = await repo.listApplicationViews();
       return Response.json({ applications }, { headers: JSON_HEADERS });
     }
@@ -89,7 +111,7 @@ export default {
       url.pathname.startsWith("/api/jobs/") &&
       url.pathname.endsWith("/application")
     ) {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const id = url.pathname.slice("/api/jobs/".length, -"/application".length);
       const body = (await request.json().catch(() => ({}))) as { status?: string };
       const status = body.status?.toUpperCase();
@@ -120,13 +142,13 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/api/poll") {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const summary = await buildScheduler(env).runCycle(new Date().toISOString());
       return Response.json({ summary }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "POST" && url.pathname === "/api/poll/company") {
-      if (!isAuthorized(request, env)) return unauthorized();
+      if (!(await isAuthorized(request, env))) return unauthorized();
       const body = (await request.json().catch(() => ({}))) as { companyId?: string };
       if (!body.companyId) {
         return Response.json(

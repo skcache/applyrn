@@ -389,6 +389,20 @@ describe("API access control", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects a wrong bearer token (fail-closed, not just missing)", async () => {
+    const res = await exports.default.fetch("https://applyrn-worker.test/api/jobs", {
+      headers: { authorization: "Bearer wrong-token-000" },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a non-Bearer scheme even with the right secret", async () => {
+    const res = await exports.default.fetch("https://applyrn-worker.test/api/jobs", {
+      headers: { authorization: "Basic test-dashboard-token-000" },
+    });
+    expect(res.status).toBe(401);
+  });
+
   it("rejects /api/poll without a token", async () => {
     const res = await exports.default.fetch("https://applyrn-worker.test/api/poll", {
       method: "POST",

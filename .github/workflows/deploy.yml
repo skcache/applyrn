@@ -23,10 +23,19 @@ jobs:
     env:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DASHBOARD_TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
     steps:
       - name: Deploy skipped (credentials not configured)
         if: ${{ env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '' }}
         run: 'echo "Deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set."'
+
+      - name: Deploy blocked (DASHBOARD_TOKEN not configured)
+        if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' && env.DASHBOARD_TOKEN == '' }}
+        run: |
+          echo "::error::Deploy blocked: DASHBOARD_TOKEN secret is not set."
+          echo "The worker API fails CLOSED without it, so deploying would lock out the dashboard."
+          echo "Add a DASHBOARD_TOKEN secret to this repository (Settings > Secrets and variables > Actions)."
+          exit 1
 
       - uses: actions/checkout@v4
         if: ${{ env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != '' }}
@@ -68,6 +77,7 @@ jobs:
         run: |
           echo "${{ secrets.TELEGRAM_BOT_TOKEN }}" | npx wrangler secret put TELEGRAM_BOT_TOKEN
           echo "${{ secrets.TELEGRAM_CHAT_ID }}" | npx wrangler secret put TELEGRAM_CHAT_ID
+          echo "${{ secrets.DASHBOARD_TOKEN }}" | npx wrangler secret put DASHBOARD_TOKEN
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CF_ACCOUNT_ID }}
