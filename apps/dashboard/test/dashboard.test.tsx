@@ -92,7 +92,7 @@ describe("App gate", () => {
 
     render(<App />);
     await user.type(screen.getByPlaceholderText("dashboard token"), "test-token");
-    await user.click(screen.getByRole("button", { name: "Open" }));
+    await user.click(screen.getByRole("button", { name: /open/i }));
 
     await waitFor(() =>
       expect(screen.getByText("Software Engineering Intern")).toBeInTheDocument(),
@@ -100,7 +100,8 @@ describe("App gate", () => {
     expect(screen.getByText("Example AI")).toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.getByText(/1 companies/i)).toBeInTheDocument();
-    expect(screen.getByText(/120s cadence/i)).toBeInTheDocument();
+    expect(screen.getByText(/cadence/i)).toBeInTheDocument();
+    expect(screen.getByText(/last poll/i)).toBeInTheDocument();
   });
 
   it("rejects a bad token", async () => {
@@ -111,7 +112,7 @@ describe("App gate", () => {
     );
     render(<App />);
     await user.type(screen.getByPlaceholderText("dashboard token"), "wrong");
-    await user.click(screen.getByRole("button", { name: "Open" }));
+    await user.click(screen.getByRole("button", { name: /open/i }));
     await waitFor(() => expect(screen.getByText(/rejected/i)).toBeInTheDocument());
   });
 });
@@ -173,7 +174,7 @@ describe("App tape", () => {
     );
     expect(screen.getByText("Example AI")).toBeInTheDocument();
     expect(screen.getByText("INTERVIEW")).toBeInTheDocument();
-    expect(screen.getByText("1h")).toBeInTheDocument(); // detection → applied latency
+    expect(screen.getByText(/→ 1h/)).toBeInTheDocument(); // detection → applied latency
   });
 
   it("updates status from the applications view", async () => {

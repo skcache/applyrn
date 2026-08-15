@@ -11,106 +11,20 @@ import {
   type ApplicationView,
   type JobView,
   type SourceHealth,
+  type SystemStatus,
 } from "./api";
 
 /**
- * ApplyRN — the quiet recruiting terminal (PRD section 7).
- * Dark graphite canvas, large type, hairline separators, minimal chrome.
+ * ApplyRN — an editorial recruiting terminal.
+ *
+ * Visual architecture (PRD 7, PR #12): IDENTITY → SYSTEM STATE → LIVE
+ * MARKET → DETAIL. Oversized display type anchors the first viewport;
+ * system state is a quiet editorial block, not a utility strip; the feed
+ * uses hairline rules instead of a bordered spreadsheet. One warm coral
+ * accent, used sparingly. Typography over decoration.
  */
 
 type View = "live" | "applications" | "sources";
-
-/** Small status dropdown used in tape rows and the detail view. */
-function StatusSelect({
-  value,
-  onChange,
-}: {
-  value: string | undefined;
-  onChange: (status: ApplicationStatus) => void;
-}) {
-  return (
-    <select
-      value={value ?? "DETECTED"}
-      onChange={(e) => onChange(e.target.value as ApplicationStatus)}
-      onClick={(e) => e.stopPropagation()}
-      className="border border-zinc-800 bg-[#0c0e11] px-1.5 py-0.5 text-xs text-zinc-300 focus:border-zinc-600 focus:outline-none"
-    >
-      {APPLICATION_STATUSES.map((s) => (
-        <option key={s} value={s}>
-          {s}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function Applications({
-  applications,
-  onStatus,
-}: {
-  applications: ApplicationView[];
-  onStatus: (jobId: string, status: ApplicationStatus) => void;
-}) {
-  return (
-    <div className="border border-zinc-800">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-zinc-800 text-left">
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Company
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Role
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Status
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Detected
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Applied
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Detection → applied
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {applications.map((app) => {
-            const latency =
-              app.appliedAt && app.jobDetectedAt
-                ? ageLabel(app.jobDetectedAt, Date.parse(app.appliedAt))
-                : "—";
-            return (
-              <tr key={app.jobId} className="border-t border-zinc-800/70">
-                <td className="px-4 py-2.5 text-zinc-300">{app.companyName}</td>
-                <td className="px-4 py-2.5 text-zinc-100">{app.jobTitle}</td>
-                <td className="px-4 py-2.5">
-                  <StatusSelect value={app.status} onChange={(s) => onStatus(app.jobId, s)} />
-                </td>
-                <td className="px-4 py-2.5 text-xs text-zinc-500">
-                  {new Date(app.jobDetectedAt).toLocaleString()}
-                </td>
-                <td className="px-4 py-2.5 text-xs text-zinc-500">
-                  {app.appliedAt ? new Date(app.appliedAt).toLocaleString() : "—"}
-                </td>
-                <td className="px-4 py-2.5 font-mono text-xs text-zinc-500">{latency}</td>
-              </tr>
-            );
-          })}
-          {applications.length === 0 && (
-            <tr>
-              <td colSpan={6} className="px-4 py-10 text-center text-sm text-zinc-600">
-                Nothing tracked yet. Set a status on any job in the tape.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -166,10 +80,13 @@ function Gate({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#0c0e11] text-zinc-200 flex items-center justify-center px-6">
+    <div
+      className="flex min-h-screen items-center justify-center px-6"
+      style={{ background: "var(--bg)" }}
+    >
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">APPLYRN</h1>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">
+        <h1 className="wordmark">ApplyRN</h1>
+        <p className="mt-6 text-sm leading-6" style={{ color: "var(--text-2)" }}>
           Your recruiting terminal. Enter the dashboard token to open the tape.
         </p>
         <input
@@ -178,16 +95,106 @@ function Gate({ onAuthed }: { onAuthed: () => void }) {
           onChange={(e) => setTokenInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="dashboard token"
-          className="mt-6 w-full border border-zinc-800 bg-transparent px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          className="mt-8 w-full border bg-transparent px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--text-3)]"
+          style={{ borderColor: "var(--divider-strong)", color: "var(--text)" }}
         />
-        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+        {error && (
+          <p className="mt-3 text-xs" style={{ color: "var(--accent)" }}>
+            {error}
+          </p>
+        )}
         <button
           onClick={submit}
-          className="mt-4 w-full border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 hover:border-zinc-500 hover:text-white transition-colors"
+          className="mt-6 px-5 py-2 text-sm font-medium transition-colors"
+          style={{ color: "var(--accent)" }}
         >
-          Open
+          Open →
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Small status dropdown used in applications and the detail view. */
+function StatusSelect({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (status: ApplicationStatus) => void;
+}) {
+  return (
+    <select
+      value={value ?? "DETECTED"}
+      onChange={(e) => onChange(e.target.value as ApplicationStatus)}
+      onClick={(e) => e.stopPropagation()}
+      className="w-28 cursor-pointer border bg-transparent px-1.5 py-0.5 text-[11px] uppercase tracking-[0.14em] outline-none transition-colors hover:border-[var(--text-3)] focus:border-[var(--text-3)]"
+      style={{ borderColor: "var(--divider-strong)", color: "var(--text-2)" }}
+    >
+      {APPLICATION_STATUSES.map((s) => (
+        <option key={s} value={s}>
+          {s}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Status as editorial text, not a badge. */
+function StatusText({ status }: { status: string | undefined }) {
+  if (!status || status === "DETECTED") return null;
+  const later = ["APPLIED", "OA", "INTERVIEW", "FINAL", "OFFER"].includes(status);
+  const closed = ["REJECTED", "GHOSTED"].includes(status);
+  const color = closed ? "var(--text-3)" : later ? "var(--accent-soft)" : "var(--text-2)";
+  return (
+    <span className="ml-3 text-[10.5px] font-medium uppercase tracking-[0.18em]" style={{ color }}>
+      {status}
+    </span>
+  );
+}
+
+function Applications({
+  applications,
+  onStatus,
+}: {
+  applications: ApplicationView[];
+  onStatus: (jobId: string, status: ApplicationStatus) => void;
+}) {
+  if (applications.length === 0) {
+    return (
+      <p className="py-16 text-sm" style={{ color: "var(--text-3)" }}>
+        Nothing tracked yet. Set a status on any job in the tape.
+      </p>
+    );
+  }
+  return (
+    <div className="sm:grid sm:grid-cols-[1.2fr_1.6fr_auto_auto_auto] sm:gap-x-8">
+      {applications.map((app, i) => {
+        const latency =
+          app.appliedAt && app.jobDetectedAt
+            ? ageLabel(app.jobDetectedAt, Date.parse(app.appliedAt))
+            : "—";
+        return (
+          <div key={app.jobId} className="sm:contents">
+            <div className="py-5 text-[15px]" style={{ color: "var(--text-2)" }}>
+              {app.companyName}
+            </div>
+            <div className="py-5 text-[15px]" style={{ color: "var(--text)" }}>
+              {app.jobTitle}
+            </div>
+            <div className="py-5">
+              <StatusSelect value={app.status} onChange={(s) => onStatus(app.jobId, s)} />
+            </div>
+            <div className="mono py-5 text-xs" style={{ color: "var(--text-3)" }}>
+              detected {ageLabel(app.jobDetectedAt)}
+            </div>
+            <div className="mono py-5 text-xs" style={{ color: "var(--text-3)" }}>
+              {app.appliedAt ? `applied ${ageLabel(app.appliedAt)} · → ${latency}` : "not applied"}
+            </div>
+            {i < applications.length - 1 && <hr className="rule sm:col-span-5" />}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -201,36 +208,58 @@ function TapeRow({
   now: number;
   onSelect: (job: JobView) => void;
 }) {
-  const reasons = matchReasons(job);
+  const [hover, setHover] = useState(false);
   return (
-    <tr
+    <button
       onClick={() => onSelect(job)}
-      className="border-t border-zinc-800/70 cursor-pointer hover:bg-zinc-900/60 transition-colors"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="group w-full cursor-pointer border-0 bg-transparent text-left"
     >
-      <td className="py-3 pr-4 font-mono text-xs text-zinc-500 whitespace-nowrap">
-        {ageLabel(job.detectedAt, now)}
-      </td>
-      <td className="py-3 pr-4 text-sm text-zinc-300 whitespace-nowrap">{job.companyName}</td>
-      <td className="py-3 pr-4 text-sm text-zinc-100">
-        {job.title}
-        {job.applicationStatus && job.applicationStatus !== "DETECTED" && (
-          <span className="ml-2 text-xs text-amber-200/70 uppercase tracking-wide">
-            {job.applicationStatus}
+      <div className="grid grid-cols-1 gap-x-8 gap-y-1.5 px-1 py-5 transition-colors duration-200 sm:grid-cols-[3.5rem_1.1fr_2.2fr_3.5rem_auto] sm:items-baseline sm:py-6">
+        {/* AGE */}
+        <div className="mono text-xs" style={{ color: hover ? "var(--text-2)" : "var(--text-3)" }}>
+          {ageLabel(job.detectedAt, now)}
+        </div>
+        {/* COMPANY */}
+        <div
+          className="text-[15px] transition-colors duration-200 sm:hidden lg:block"
+          style={{ color: hover ? "var(--text)" : "var(--text-2)" }}
+        >
+          {job.companyName}
+        </div>
+        {/* ROLE */}
+        <div>
+          <span
+            className="text-[17px] font-medium tracking-[-0.01em] transition-colors duration-200"
+            style={{ color: hover ? "var(--text)" : "var(--text)" }}
+          >
+            {job.title}
           </span>
-        )}
-      </td>
-      <td className="py-3 pr-4 text-right font-mono text-xs text-zinc-400 whitespace-nowrap">
-        {job.matchScore !== undefined && job.matchScore !== null ? job.matchScore : "—"}
-      </td>
-      <td className="py-3 pl-2 text-right text-xs uppercase tracking-wide text-zinc-500 whitespace-nowrap">
-        {job.provider}
-        {reasons.length > 0 && (
-          <span className="ml-2 hidden text-zinc-600 lg:inline">
-            · {reasons.slice(0, 2).join(", ")}
+          <StatusText status={job.applicationStatus} />
+          <span
+            className="ml-3 text-sm transition-opacity duration-200"
+            style={{ color: "var(--accent)", opacity: hover ? 1 : 0 }}
+          >
+            ↗
           </span>
-        )}
-      </td>
-    </tr>
+        </div>
+        {/* MATCH */}
+        <div
+          className="mono text-sm text-right transition-colors duration-200"
+          style={{ color: hover ? "var(--text-2)" : "var(--text-3)" }}
+        >
+          {job.matchScore !== undefined && job.matchScore !== null ? job.matchScore : "—"}
+        </div>
+        {/* SOURCE */}
+        <div
+          className="text-right text-[11px] uppercase tracking-[0.14em] transition-colors duration-200 sm:block"
+          style={{ color: "var(--text-faint)" }}
+        >
+          {job.provider}
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -263,60 +292,75 @@ function Detail({
   }
 
   return (
-    <div className="border border-zinc-800 bg-zinc-950/60">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
-        <button
-          onClick={onBack}
-          className="text-xs uppercase tracking-wide text-zinc-500 hover:text-zinc-300"
-        >
+    <div>
+      <div className="flex items-baseline justify-between">
+        <button onClick={onBack} className="nav-link">
           ← Tape
         </button>
-        <span className="text-xs uppercase tracking-wide text-zinc-600">{job.provider}</span>
+        <span className="section-label">{job.provider}</span>
       </div>
-      <div className="px-5 py-6">
-        <p className="text-xs uppercase tracking-wide text-zinc-500">{job.companyName}</p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-100">{job.title}</h2>
-        {job.matchScore !== undefined && job.matchScore !== null && (
-          <p className="mt-2 text-sm text-amber-200/80">
-            {job.matchScore} MATCH
-            {reasons.length > 0 && (
-              <span className="ml-2 text-zinc-500">{reasons.map((r) => `✓ ${r}`).join("  ")}</span>
-            )}
-          </p>
-        )}
-        <div className="mt-5 grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2">
-          {rows.map(([k, v]) => (
-            <div
-              key={k}
-              className="flex justify-between border-b border-zinc-800/60 py-1.5 text-sm"
-            >
-              <span className="text-zinc-500">{k}</span>
-              <span className="text-zinc-300">{v}</span>
-            </div>
-          ))}
+
+      <p className="mt-14 text-sm" style={{ color: "var(--text-2)" }}>
+        {job.companyName}
+      </p>
+      <h2
+        className="mt-3 text-3xl font-semibold tracking-[-0.02em] sm:text-4xl"
+        style={{ color: "var(--text)" }}
+      >
+        {job.title}
+      </h2>
+
+      {job.matchScore !== undefined && job.matchScore !== null && (
+        <p className="mt-5 text-sm" style={{ color: "var(--text-2)" }}>
+          <span className="mono" style={{ color: "var(--text)" }}>
+            {job.matchScore}
+          </span>{" "}
+          match
+          {reasons.length > 0 && (
+            <span className="ml-3" style={{ color: "var(--text-3)" }}>
+              {reasons.map((r) => `✓ ${r}`).join("  ")}
+            </span>
+          )}
+        </p>
+      )}
+
+      <hr className="rule my-8" />
+
+      <div className="grid grid-cols-1 gap-x-10 gap-y-3 sm:grid-cols-2">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-6 text-sm">
+            <span style={{ color: "var(--text-3)" }}>{k}</span>
+            <span style={{ color: "var(--text-2)" }}>{v}</span>
+          </div>
+        ))}
+      </div>
+
+      {job.descriptionPlain && (
+        <p className="mt-8 max-w-2xl text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
+          {job.descriptionPlain}
+        </p>
+      )}
+
+      <div className="mt-12 flex flex-wrap items-center gap-6">
+        <div className="flex items-center gap-3">
+          <span className="section-label">Status</span>
+          <StatusSelect value={job.applicationStatus} onChange={onStatus} />
         </div>
-        {job.descriptionPlain && (
-          <p className="mt-5 max-w-2xl text-sm leading-6 text-zinc-400">{job.descriptionPlain}</p>
-        )}
-        <div className="mt-6 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wide text-zinc-500">Status</span>
-            <StatusSelect value={job.applicationStatus} onChange={onStatus} />
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => onOpen(job.applyUrl)}
-              className="border border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-100 hover:border-zinc-400 hover:text-white transition-colors"
-            >
-              APPLY NOW
-            </button>
-            <button
-              onClick={() => onOpen(job.jobUrl)}
-              className="border border-zinc-800 px-4 py-2 text-sm text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 transition-colors"
-            >
-              DETAILS
-            </button>
-          </div>
+        <div className="flex items-center gap-6">
+          <button
+            onClick={() => onOpen(job.applyUrl)}
+            className="text-sm font-medium transition-colors"
+            style={{ color: "var(--accent)" }}
+          >
+            APPLY NOW →
+          </button>
+          <button
+            onClick={() => onOpen(job.jobUrl)}
+            className="nav-link"
+            style={{ color: "var(--text-2)" }}
+          >
+            Details
+          </button>
         </div>
       </div>
     </div>
@@ -324,64 +368,100 @@ function Detail({
 }
 
 function Sources({ sources }: { sources: SourceHealth[] }) {
+  if (sources.length === 0) {
+    return (
+      <p className="py-16 text-sm" style={{ color: "var(--text-3)" }}>
+        No sources configured.
+      </p>
+    );
+  }
   return (
-    <div className="border border-zinc-800">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-zinc-800 text-left">
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Company
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Provider
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Status
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Last success
-            </th>
-            <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Failures
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sources.map((s) => {
-            const healthy = s.enabled && !s.backoffUntil && s.failureStreak === 0;
-            const backoff = s.enabled && !!s.backoffUntil;
-            const status = !s.enabled
-              ? "disabled"
-              : backoff
-                ? "backoff"
-                : healthy
-                  ? "healthy"
-                  : "degraded";
-            return (
-              <tr key={s.companyId} className="border-t border-zinc-800/70">
-                <td className="px-4 py-2.5 text-zinc-200">{s.name}</td>
-                <td className="px-4 py-2.5 text-zinc-400 capitalize">{s.provider}</td>
-                <td
-                  className={`px-4 py-2.5 text-xs uppercase tracking-wide ${status === "healthy" ? "text-zinc-400" : status === "backoff" ? "text-amber-200/80" : "text-red-400/90"}`}
-                >
-                  {status}
-                </td>
-                <td className="px-4 py-2.5 text-xs text-zinc-500">
-                  {s.lastSuccessAt ? new Date(s.lastSuccessAt).toLocaleString() : "never"}
-                </td>
-                <td className="px-4 py-2.5 text-xs text-zinc-500">{s.failureStreak}</td>
-              </tr>
-            );
-          })}
-          {sources.length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-4 py-8 text-center text-sm text-zinc-600">
-                No sources configured.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+    <div className="sm:grid sm:grid-cols-[1.6fr_1fr_auto_auto] sm:gap-x-8">
+      {sources.map((s, i) => {
+        const healthy = s.enabled && !s.backoffUntil && s.failureStreak === 0;
+        const backoff = s.enabled && !!s.backoffUntil;
+        const status = !s.enabled
+          ? "disabled"
+          : backoff
+            ? "backoff"
+            : healthy
+              ? "healthy"
+              : "degraded";
+        const statusColor = healthy
+          ? "var(--text-2)"
+          : backoff
+            ? "var(--accent-soft)"
+            : "var(--accent)";
+        return (
+          <div key={s.companyId} className="sm:contents">
+            <div className="py-5 text-[15px]" style={{ color: "var(--text)" }}>
+              {s.name}
+            </div>
+            <div
+              className="py-5 text-[11px] uppercase tracking-[0.14em]"
+              style={{ color: "var(--text-faint)" }}
+            >
+              {s.provider}
+            </div>
+            <div
+              className="py-5 text-[11px] uppercase tracking-[0.18em]"
+              style={{ color: statusColor }}
+            >
+              {status}
+            </div>
+            <div className="mono py-5 text-xs" style={{ color: "var(--text-3)" }}>
+              {s.lastSuccessAt ? `last success ${ageLabel(s.lastSuccessAt)} ago` : "never polled"}
+              {s.failureStreak > 0
+                ? ` · ${s.failureStreak} failure${s.failureStreak === 1 ? "" : "s"}`
+                : ""}
+            </div>
+            {i < sources.length - 1 && <hr className="rule sm:col-span-4" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Hero({ sys, now }: { sys: SystemStatus | undefined; now: number }) {
+  const stale = sys?.lastPollAt ? Date.now() - Date.parse(sys.lastPollAt) > 5 * 60 * 1000 : false;
+  return (
+    <div className="grid grid-cols-1 gap-x-12 gap-y-10 py-16 sm:py-20 lg:grid-cols-[1.7fr_1fr] lg:items-end">
+      <div>
+        <h1 className="hero-display">
+          Jobs,
+          <br />
+          before the
+          <br />
+          crowd<span className="hero-accent">.</span>
+        </h1>
+      </div>
+      <div className="lg:justify-self-end lg:pb-3 lg:text-right">
+        <p className="max-w-xs text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
+          We watch company career feeds{" "}
+          <span style={{ color: "var(--text)" }}>
+            every {sys ? sys.cadenceSeconds : 120} seconds.
+          </span>
+        </p>
+        <div className="mt-8 space-y-1.5">
+          <p
+            className="text-[11px] font-medium uppercase tracking-[0.24em]"
+            style={{ color: "var(--accent)" }}
+          >
+            Live
+          </p>
+          <p className="text-sm" style={{ color: "var(--text-2)" }}>
+            {sys ? `${sys.companyCount} companies` : "…"} ·{" "}
+            <span className="mono">{sys ? `${sys.cadenceSeconds}s` : "120s"}</span> cadence
+          </p>
+          <p
+            className="mono text-sm"
+            style={{ color: stale ? "var(--accent-soft)" : "var(--text-3)" }}
+          >
+            {sys?.lastPollAt ? `last poll ${ageLabel(sys.lastPollAt, now)} ago` : "no polls yet"}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -418,20 +498,18 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0c0e11] text-zinc-200">
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8 lg:px-10">
-        {/* Header */}
-        <header className="flex items-baseline justify-between border-b border-zinc-800 pb-4">
-          <h1 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-100">
-            ApplyRN
-          </h1>
-          <div className="flex items-center gap-5 text-xs text-zinc-500">
+    <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
+      <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-7 py-10 lg:px-12">
+        {/* IDENTITY */}
+        <header className="flex items-baseline justify-between">
+          <h1 className="wordmark">ApplyRN</h1>
+          <nav className="flex items-baseline gap-7 sm:gap-9">
             <button
               onClick={() => {
                 setView("live");
                 setSelected(null);
               }}
-              className={`uppercase tracking-wide ${view === "live" ? "text-zinc-100" : "hover:text-zinc-300"}`}
+              className={`nav-link ${view === "live" ? "active" : ""}`}
             >
               Live
             </button>
@@ -440,7 +518,7 @@ export function App() {
                 setView("applications");
                 setSelected(null);
               }}
-              className={`uppercase tracking-wide ${view === "applications" ? "text-zinc-100" : "hover:text-zinc-300"}`}
+              className={`nav-link ${view === "applications" ? "active" : ""}`}
             >
               Applications
             </button>
@@ -449,7 +527,7 @@ export function App() {
                 setView("sources");
                 setSelected(null);
               }}
-              className={`uppercase tracking-wide ${view === "sources" ? "text-zinc-100" : "hover:text-zinc-300"}`}
+              className={`nav-link ${view === "sources" ? "active" : ""}`}
             >
               Sources
             </button>
@@ -458,65 +536,47 @@ export function App() {
                 clearToken();
                 setAuthed(false);
               }}
-              className="uppercase tracking-wide text-zinc-600 hover:text-zinc-400"
+              className="nav-link quiet"
             >
               Sign out
             </button>
-          </div>
+          </nav>
         </header>
 
-        {/* System state */}
-        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-800 py-3">
-          <span className="text-xs uppercase tracking-wide text-zinc-500">
-            {sys ? `${sys.companyCount} companies · ${sys.cadenceSeconds}s cadence` : "loading…"}
-          </span>
-          <span className="text-xs uppercase tracking-wide text-zinc-600">
-            {sys?.lastPollAt ? `last poll ${ageLabel(sys.lastPollAt, now)} ago` : "no polls yet"}
-          </span>
-        </div>
+        {/* LIVE: SYSTEM STATE + MARKET */}
+        {view === "live" && !selected && (
+          <>
+            <Hero sys={sys} now={now} />
 
-        {/* Body */}
-        <main className="flex-1 py-6">
-          {jobs.error && <p className="text-sm text-red-400">{jobs.error}</p>}
-          {view === "live" && !selected && (
-            <div className="border border-zinc-800">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-zinc-800 text-left">
-                    <th className="py-2 pr-4 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                      Age
-                    </th>
-                    <th className="py-2 pr-4 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                      Company
-                    </th>
-                    <th className="py-2 pr-4 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                      Role
-                    </th>
-                    <th className="py-2 pr-4 text-right text-xs font-medium uppercase tracking-wide text-zinc-500">
-                      Match
-                    </th>
-                    <th className="py-2 pl-2 text-right text-xs font-medium uppercase tracking-wide text-zinc-500">
-                      Source
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(jobs.data?.jobs ?? []).map((job) => (
-                    <TapeRow key={job.id} job={job} now={now} onSelect={setSelected} />
-                  ))}
-                  {jobs.data && jobs.data.jobs.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="py-12 text-center text-sm text-zinc-600">
-                        No jobs detected yet. The tape stays quiet until the first poll finds
-                        something.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="flex items-baseline justify-between pb-3">
+              <span className="section-label">Latest openings</span>
+              {jobs.error && (
+                <span className="text-xs" style={{ color: "var(--accent)" }}>
+                  {jobs.error}
+                </span>
+              )}
             </div>
-          )}
-          {view === "live" && selected && (
+            <hr className="rule" />
+
+            {jobs.data && jobs.data.jobs.length === 0 ? (
+              <p className="py-16 text-sm" style={{ color: "var(--text-3)" }}>
+                No jobs detected yet. The tape stays quiet until the first poll finds something.
+              </p>
+            ) : (
+              <div>
+                {(jobs.data?.jobs ?? []).map((job) => (
+                  <div key={job.id}>
+                    <TapeRow job={job} now={now} onSelect={setSelected} />
+                    <hr className="rule" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {view === "live" && selected && (
+          <main className="flex-1 py-12">
             <Detail
               job={selected}
               onBack={() => setSelected(null)}
@@ -526,18 +586,45 @@ export function App() {
                 void setStatus(selected.id, s);
               }}
             />
-          )}
-          {view === "applications" && (
-            <Applications
-              applications={applications.data?.applications ?? []}
-              onStatus={setStatus}
-            />
-          )}
-          {view === "sources" && <Sources sources={sources.data?.sources ?? []} />}
-        </main>
+          </main>
+        )}
 
-        <footer className="border-t border-zinc-800 pt-4 text-xs text-zinc-600">
-          Find it early. Apply right now.
+        {view === "applications" && (
+          <main className="flex-1 py-16">
+            <h2 className="hero-display" style={{ fontSize: "clamp(2rem, 4vw, 3.5rem)" }}>
+              Applications
+            </h2>
+            <p className="mt-4 max-w-md text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
+              What you have touched, from detected to offer.
+            </p>
+            <div className="mt-12">
+              <Applications
+                applications={applications.data?.applications ?? []}
+                onStatus={setStatus}
+              />
+            </div>
+          </main>
+        )}
+
+        {view === "sources" && (
+          <main className="flex-1 py-16">
+            <h2 className="hero-display" style={{ fontSize: "clamp(2rem, 4vw, 3.5rem)" }}>
+              Sources
+            </h2>
+            <p className="mt-4 max-w-md text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
+              Which career feeds we watch, and how they are doing.
+            </p>
+            <div className="mt-12">
+              <Sources sources={sources.data?.sources ?? []} />
+            </div>
+          </main>
+        )}
+
+        <footer className="mt-auto pt-16 pb-2">
+          <hr className="rule mb-5" />
+          <p className="text-xs" style={{ color: "var(--text-faint)" }}>
+            Find it early. Apply right now.
+          </p>
         </footer>
       </div>
     </div>

@@ -1,5 +1,117 @@
+@import "@fontsource-variable/inter";
 @import "tailwindcss";
 
+/*
+ * ApplyRN design tokens — editorial recruiting terminal.
+ * Reference language: warm charcoal, warm off-white, one scarce coral accent,
+ * typography over decoration. No pure black/white, no blue.
+ */
 :root {
   color-scheme: dark;
+
+  --bg: #15120e;
+  --surface: #1b1712;
+  --surface-2: #221d16;
+  --divider: rgba(236, 230, 221, 0.09);
+  --divider-strong: rgba(236, 230, 221, 0.16);
+
+  --text: #ece6dd;
+  --text-2: #a59d90;
+  --text-3: #6f675c;
+  --text-faint: #4a443c;
+
+  --accent: #ff5c4d;
+  --accent-soft: rgba(255, 92, 77, 0.75);
+
+  --font-display:
+    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Editorial display type for the hero. */
+.hero-display {
+  font-size: clamp(3.5rem, 8vw, 7.5rem);
+  line-height: 0.94;
+  letter-spacing: -0.03em;
+  font-weight: 640;
+  color: var(--text);
+  margin: 0;
+}
+
+.hero-accent {
+  color: var(--accent);
+}
+
+/* Quiet editorial section label, not dashboard chrome. */
+.section-label {
+  font-size: 11px;
+  font-weight: 520;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Hairline rule. */
+.rule {
+  border: 0;
+  border-top: 1px solid var(--divider);
+  margin: 0;
+}
+
+/* Nav wordmark + links. */
+.wordmark {
+  font-weight: 620;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.nav-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  transition: color 160ms ease;
+}
+.nav-link:hover {
+  color: var(--text-2);
+}
+.nav-link.active {
+  color: var(--accent);
+}
+.nav-link.quiet {
+  color: var(--text-faint);
+}
+.nav-link.quiet:hover {
+  color: var(--text-3);
+}
+
+/* Mono numerics: ages, scores, latency. */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
