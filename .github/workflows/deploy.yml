@@ -6,8 +6,10 @@ on:
     branches: [main]
 
 # Gated on Cloudflare credentials: when CLOUDFLARE_API_TOKEN / ACCOUNT_ID
-# secrets are absent (e.g. public forks, pre-setup), the deploy job skips.
+# secrets are absent (e.g. public forks, pre-setup), the deploy steps skip.
 # The owner enables deployment by setting those two secrets.
+# Note: `secrets` is not available in job-level `if:`, so the gate lives on
+# the individual steps.
 
 permissions:
   contents: read
@@ -16,23 +18,27 @@ jobs:
   deploy:
     name: Deploy Worker + D1 migrations
     runs-on: ubuntu-latest
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
     steps:
       - uses: actions/checkout@v4
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
 
       - uses: pnpm/action-setup@v4
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         with:
           version: 10
 
       - uses: actions/setup-node@v4
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install dependencies
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         run: pnpm install --frozen-lockfile
 
       - name: Apply D1 migrations
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         working-directory: apps/worker
         run: npx wrangler d1 migrations apply applyrn --remote
         env:
@@ -40,6 +46,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy Worker
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         working-directory: apps/worker
         run: npx wrangler deploy
         env:
@@ -47,6 +54,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set Worker secrets
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         working-directory: apps/worker
         run: |
           echo "${{ secrets.TELEGRAM_BOT_TOKEN }}" | npx wrangler secret put TELEGRAM_BOT_TOKEN
@@ -55,9 +63,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-  skipped:
-    name: Deploy skipped (credentials not configured)
-    runs-on: ubuntu-latest
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' || secrets.CLOUDFLARE_ACCOUNT_ID == '' }}
-    steps:
-      - run: 'echo "Deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set."'
+      - name: Deploy skipped (credentials not configured)
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' || secrets.CLOUDFLARE_ACCOUNT_ID == '' }}
+        run: 'echo "Deploy skipped: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set."'
