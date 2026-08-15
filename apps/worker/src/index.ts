@@ -51,8 +51,36 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/jobs") {
       if (!isAuthorized(request, env)) return unauthorized();
-      const jobs = await repo.listJobs(50);
+      const jobs = await repo.listJobViews(50);
       return Response.json({ jobs }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/jobs/")) {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const id = url.pathname.slice("/api/jobs/".length);
+      const job = await repo.getJobView(id);
+      if (!job) {
+        return Response.json({ error: "unknown job" }, { status: 404, headers: JSON_HEADERS });
+      }
+      return Response.json({ job }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/sources") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const sources = await repo.listSourceHealth();
+      return Response.json({ sources }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/status") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const status = await repo.getSystemStatus();
+      return Response.json({ status }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/applications") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      const applications = await repo.listApplicationViews();
+      return Response.json({ applications }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "POST" && url.pathname === "/api/poll") {
