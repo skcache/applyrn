@@ -19,6 +19,8 @@ import {
 
 const API_BASE = "https://boards-api.greenhouse.io/v1/boards";
 const REQUEST_TIMEOUT_MS = 10_000;
+/** Reject boards larger than this; guards against runaway payloads. */
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 type GreenhouseJob = {
   id?: number | string;
@@ -95,6 +97,13 @@ export class GreenhouseAdapter implements JobSourceAdapter {
         "server_error",
         `Greenhouse unexpected status (${res.status}): ${url}`,
         res.status,
+      );
+    }
+    const contentLength = Number(res.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+      throw new AdapterError(
+        "malformed",
+        `Greenhouse response exceeds ${MAX_RESPONSE_BYTES} bytes: ${url}`,
       );
     }
     return res;

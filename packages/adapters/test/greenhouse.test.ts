@@ -136,6 +136,19 @@ describe("GreenhouseAdapter fetchBoard failures", () => {
     await expect(adapter.fetchBoard(company)).rejects.toMatchObject({ code: "malformed" });
   });
 
+  it("rejects oversized responses via content-length", async () => {
+    const big = "x".repeat(6 * 1024 * 1024);
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(big, {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Content-Length": String(big.length) },
+        }),
+    );
+    const adapter = new GreenhouseAdapter(fetchImpl);
+    await expect(adapter.fetchBoard(company)).rejects.toMatchObject({ code: "malformed" });
+  });
+
   it("verifies the request URL encodes the board key", async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       expect(url).toBe("https://boards-api.greenhouse.io/v1/boards/exampleai/jobs");
