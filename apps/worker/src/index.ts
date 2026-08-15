@@ -1,4 +1,4 @@
-import { GreenhouseAdapter } from "@applyrn/adapters";
+import { AshbyAdapter, GreenhouseAdapter } from "@applyrn/adapters";
 import type { JobSourceAdapter } from "@applyrn/adapters";
 import { D1Repository } from "./repo.js";
 import { PollService, type WorkerEnv } from "./poll.js";
@@ -86,6 +86,7 @@ export default {
 function buildPollService(env: WorkerEnv): PollService {
   const adapters = new Map<string, JobSourceAdapter>();
   adapters.set("greenhouse", new GreenhouseAdapter());
+  adapters.set("ashby", new AshbyAdapter());
   return new PollService(new D1Repository(env.DB), adapters, env);
 }
 
