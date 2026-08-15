@@ -429,16 +429,14 @@ function Hero({ sys, now }: { sys: SystemStatus | undefined; now: number }) {
     <div className="grid grid-cols-1 gap-x-12 gap-y-10 py-16 sm:py-20 lg:grid-cols-[1.7fr_1fr] lg:items-end">
       <div>
         <h1 className="hero-display">
-          Jobs,
+          Anything
           <br />
-          before the
-          <br />
-          crowd<span className="hero-accent">.</span>
+          new<span className="hero-accent">?</span>
         </h1>
       </div>
       <div className="lg:justify-self-end lg:pb-3 lg:text-right">
         <p className="max-w-xs text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
-          We watch company career feeds{" "}
+          Your career feeds, checked{" "}
           <span style={{ color: "var(--text)" }}>
             every {sys ? sys.cadenceSeconds : 120} seconds.
           </span>
