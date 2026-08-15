@@ -421,6 +421,62 @@ describe("API access control", () => {
   });
 });
 
+describe("relevance integration", () => {
+  it("suppresses a hard-mismatch job from alerts but persists it", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline
+
+    // A clearly senior role appears on the board.
+    const senior = {
+      id: 70009,
+      title: "Staff Software Engineer",
+      location: { name: "San Francisco, CA" },
+      absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70009",
+      updated_at: "2026-08-14T21:00:00Z",
+    };
+    stubBoard({ jobs: [...jobs, senior] });
+    const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubTelegram({ capture: calls });
+
+    const { outcome } = await pollCompany("example-ai");
+    expect(outcome.ok).toBe(true);
+    expect(outcome.newJobs).toBe(0); // suppressed: not counted as alertable
+    expect(outcome.alertsSent).toBe(0);
+    expect(calls).toHaveLength(0); // no Telegram message
+    expect(await countRows("jobs")).toBe(4); // still persisted
+    const row = await rows("jobs", "external_job_id = '70009'");
+    expect(row[0]!.match_score).toBe(0); // scored 0 for a suppressed job
+  });
+
+  it("alerts a relevant job with the match score and reasons", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline
+
+    const relevant = {
+      id: 70010,
+      title: "Software Engineering Intern",
+      location: { name: "San Francisco, CA" },
+      absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70010",
+      updated_at: "2026-08-14T21:30:00Z",
+    };
+    stubBoard({ jobs: [...jobs, relevant] });
+    const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubTelegram({ capture: calls });
+
+    const { outcome } = await pollCompany("example-ai");
+    expect(outcome.newJobs).toBe(1);
+    expect(outcome.alertsSent).toBe(1);
+    const sent = calls[0]!;
+    expect(sent.text).toContain("MATCH"); // score header rendered
+    expect(sent.text).toContain("Internship");
+    expect(sent.text).toContain("Software engineering");
+    const row = await rows("jobs", "external_job_id = '70010'");
+    expect(Number(row[0]!.match_score)).toBeGreaterThan(0);
+  });
+});
+
 describe("bounded notification retry", () => {
   it("does not retry within the throttle window", async () => {
     stubBoard({ jobs });
