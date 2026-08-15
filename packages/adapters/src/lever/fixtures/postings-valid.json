@@ -1,0 +1,33 @@
+[
+  {
+    "id": "abc123",
+    "text": "Software Engineering Intern",
+    "hostedUrl": "https://jobs.lever.co/exampleai/abc123",
+    "applyUrl": "https://jobs.lever.co/exampleai/abc123/apply",
+    "categories": {
+      "team": "Platform",
+      "commitment": "Internship",
+      "location": "San Francisco",
+      "department": "Engineering",
+      "allLocations": ["San Francisco", "Remote"]
+    },
+    "descriptionPlain": "Build distributed systems with the platform team.",
+    "createdAt": 1755205200000,
+    "updatedAt": 1755205200000
+  },
+  {
+    "id": "def456",
+    "text": "Applied AI Intern",
+    "hostedUrl": "https://jobs.lever.co/exampleai/def456",
+    "applyUrl": "https://jobs.lever.co/exampleai/def456/apply",
+    "categories": {
+      "team": "AI",
+      "commitment": "Internship",
+      "location": "Remote",
+      "department": "Research",
+      "allLocations": ["Remote"]
+    },
+    "createdAt": 1755201600000,
+    "updatedAt": 1755201600000
+  }
+]

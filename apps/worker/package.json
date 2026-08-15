@@ -14,6 +14,7 @@
     "@applyrn/adapters": "workspace:*",
     "@applyrn/detection": "workspace:*",
     "@applyrn/domain": "workspace:*",
+    "@applyrn/relevance": "workspace:*",
     "@applyrn/telegram": "workspace:*"
   },
   "devDependencies": {

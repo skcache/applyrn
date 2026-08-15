@@ -1,0 +1,46 @@
+{
+  "jobs": [
+    {
+      "id": "a1b2c3d4",
+      "title": "Software Engineering Intern",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "Internship",
+      "location": "San Francisco, CA",
+      "secondaryLocations": ["Remote"],
+      "workplaceType": "Hybrid",
+      "publishedAt": "2026-08-14T17:00:00Z",
+      "jobUrl": "https://jobs.ashbyhq.com/exampleai/a1b2c3d4",
+      "applyUrl": "https://jobs.ashbyhq.com/exampleai/a1b2c3d4/apply",
+      "address": { "address1": "1 Market St", "city": "San Francisco", "country": "US" },
+      "compensation": {
+        "summary": "$45-60/hr",
+        "compensationTierSummary": "Internship hourly rate"
+      },
+      "descriptionPlain": "Build distributed systems with the platform team."
+    },
+    {
+      "id": "e5f6g7h8",
+      "title": "Applied AI Intern",
+      "department": "Research",
+      "team": "AI",
+      "employmentType": "Internship",
+      "location": "Remote",
+      "publishedAt": "2026-08-14T16:40:00Z",
+      "jobUrl": "https://jobs.ashbyhq.com/exampleai/e5f6g7h8",
+      "applyUrl": "https://jobs.ashbyhq.com/exampleai/e5f6g7h8/apply",
+      "descriptionPlain": "Work on inference and model serving."
+    },
+    {
+      "id": "i9j0k1l2",
+      "title": "Systems Software Intern",
+      "department": "Infrastructure",
+      "team": "Systems",
+      "employmentType": "Internship",
+      "location": "Austin, TX",
+      "publishedAt": "2026-08-13T09:12:00Z",
+      "jobUrl": "https://jobs.ashbyhq.com/exampleai/i9j0k1l2",
+      "applyUrl": "https://jobs.ashbyhq.com/exampleai/i9j0k1l2/apply"
+    }
+  ]
+}

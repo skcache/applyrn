@@ -7,6 +7,7 @@ import {
   type DetectionDecision,
 } from "@applyrn/detection";
 import { jobId, contentHash } from "@applyrn/domain";
+import { evaluateRelevance, type RelevanceResult } from "@applyrn/relevance";
 import {
   AdapterError,
   isDetailCapable,
@@ -62,14 +63,22 @@ export function backoffSeconds(failureStreak: number): number {
   return Math.min(base + jitter, BACKOFF_MAX_SECONDS);
 }
 
-/** Serialize poll cycles so two concurrent runs cannot double-notify. */
+/**
+ * Serialize poll cycles PER COMPANY so two concurrent runs for the same
+ * company cannot double-notify. Different companies still run in parallel
+ * (the scheduler relies on that for bounded concurrency).
+ */
 class CycleGate {
-  private tail: Promise<unknown> = Promise.resolve();
+  private tails = new Map<string, Promise<unknown>>();
 
-  run<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(fn, fn);
+  run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.tails.get(key) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
     // Keep the chain alive even when a cycle rejects.
-    this.tail = next.catch(() => undefined);
+    this.tails.set(
+      key,
+      next.catch(() => undefined),
+    );
     return next;
   }
 }
@@ -83,9 +92,9 @@ export class PollService {
     private readonly env: WorkerEnv,
   ) {}
 
-  /** Serialized entry point: concurrent cycles queue, never interleave. */
+  /** Serialized entry point: concurrent cycles for the same company queue. */
   pollCompany(company: CompanyConfig, now: string): Promise<PollOutcome> {
-    return this.gate.run(() => this.pollCompanyInner(company, now));
+    return this.gate.run(company.id, () => this.pollCompanyInner(company, now));
   }
 
   /**
@@ -132,13 +141,18 @@ export class PollService {
     const existing = await this.repo.listJobsForCompany(company.id);
     const decisions = await detectJobs({ company, fetched, existing, firstRun });
 
-    const newJobs: NormalizedJob[] = [];
+    // Relevance is a convenience layer, not a gate: score every alertable
+    // job, persist the score + reasons, and suppress only hard mismatches.
+    const alertable: { job: NormalizedJob; relevance: RelevanceResult }[] = [];
     for (const d of decisions) {
       if (shouldPersist(d)) {
         const job = jobOf(d);
         if (job) {
-          await this.persistDecision(d, job, now);
-          if (shouldAlert(d)) newJobs.push(job);
+          const relevance = shouldAlert(d) ? evaluateRelevance(job) : undefined;
+          await this.persistDecision(d, job, now, relevance);
+          if (shouldAlert(d) && relevance && !relevance.suppressed) {
+            alertable.push({ job, relevance });
+          }
         }
       } else if (d.kind === "unchanged") {
         await this.repo.touchJobSeen(d.externalJobId, company.id, now);
@@ -149,8 +163,8 @@ export class PollService {
 
     await this.repo.recordSourceSuccess(company.id, now, 200, String(fetched.length));
     outcome.ok = true;
-    outcome.newJobs = newJobs.length;
-    outcome.alertsSent = await this.notifyNew(company, newJobs, now);
+    outcome.newJobs = alertable.length;
+    outcome.alertsSent = await this.notifyNew(company, alertable, now);
     return outcome;
   }
 
@@ -181,6 +195,7 @@ export class PollService {
     d: DetectionDecision,
     job: NormalizedJob,
     now: string,
+    relevance?: RelevanceResult,
   ): Promise<void> {
     const id = await jobId(job.provider, job.companyId, job.externalJobId);
     const hash = await contentHash(job);
@@ -209,6 +224,8 @@ export class PollService {
       confirmedInactiveAt: existing?.confirmedInactiveAt,
       sourceUpdatedAt: job.sourceUpdatedAt,
       contentHash: hash,
+      matchScore: relevance?.score,
+      matchReasonsJson: relevance ? JSON.stringify(relevance.reasons) : undefined,
       status:
         d.kind === "baseline"
           ? "baseline"
@@ -224,14 +241,14 @@ export class PollService {
   /** Send alerts for new/reopened jobs. Failures persist as undelivered. */
   private async notifyNew(
     company: CompanyConfig,
-    jobs: NormalizedJob[],
+    jobs: { job: NormalizedJob; relevance: RelevanceResult }[],
     now: string,
   ): Promise<number> {
     const token = this.env.TELEGRAM_BOT_TOKEN;
     const chatId = this.env.TELEGRAM_CHAT_ID;
     if (!token || !chatId) {
       // Misconfiguration: record attempts as undelivered so nothing is lost.
-      for (const job of jobs) {
+      for (const { job } of jobs) {
         const id = await jobId(job.provider, job.companyId, job.externalJobId);
         await this.repo.recordNotificationAttempt({
           jobId: id,
@@ -246,7 +263,7 @@ export class PollService {
 
     const client = new TelegramClient(token);
     let sent = 0;
-    for (const job of jobs) {
+    for (const { job, relevance } of jobs) {
       const id = await jobId(job.provider, job.companyId, job.externalJobId);
 
       // Duplicate-send guard: if a delivered notification row already exists
@@ -254,7 +271,12 @@ export class PollService {
       const prior = await this.repo.getNotification(id, "telegram");
       if (prior?.delivered) continue;
 
-      const text = renderAlertText({ job, company, detectedAt: now });
+      const text = renderAlertText({
+        job,
+        company,
+        detectedAt: now,
+        match: { score: relevance.score, reasons: relevance.reasons },
+      });
       const payload = buildSendMessagePayload(chatId, text, alertButtons(job));
       try {
         const result = await client.sendMessage(chatId, payload);
@@ -306,10 +328,18 @@ export class PollService {
       const company = await this.repo.getCompany(job.companyId);
       if (!company) continue;
       const client = new TelegramClient(token);
+      const storedMatch =
+        job.matchScore !== undefined
+          ? {
+              score: job.matchScore,
+              reasons: job.matchReasonsJson ? (JSON.parse(job.matchReasonsJson) as string[]) : [],
+            }
+          : undefined;
       const text = renderAlertText({
         job,
         company,
         detectedAt: job.detectedAt,
+        match: storedMatch,
       });
       const payload = buildSendMessagePayload(chatId, text, alertButtons(job));
       try {
