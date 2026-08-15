@@ -180,6 +180,15 @@ async function countRows(table: string): Promise<number> {
   return Number(res?.n ?? 0);
 }
 
+/** Age the source state so the poll-interval gate allows another poll. */
+async function backdateSource(id = "example-ai", ms = 200_000): Promise<void> {
+  await env.DB.prepare(
+    "UPDATE source_state SET last_success_at = ?, last_failure_at = NULL WHERE company_id = ?",
+  )
+    .bind(new Date(Date.now() - ms).toISOString(), id)
+    .run();
+}
+
 async function rows(table: string, where: string): Promise<Record<string, unknown>[]> {
   const { results } = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`).all();
   return results;
@@ -230,6 +239,7 @@ describe("new job detection", () => {
       updated_at: "2026-08-14T18:00:00Z",
     };
     stubBoard({ jobs: [...jobs, extra] });
+    await backdateSource();
     const telegramCalls: { text: string; chatId: string; buttons: unknown[] }[] = [];
     stubTelegram({ capture: telegramCalls });
 
@@ -260,6 +270,7 @@ describe("replay idempotency", () => {
     await pollCompany("example-ai"); // baseline
 
     for (let i = 0; i < 100; i++) {
+      await backdateSource();
       const { outcome } = await pollCompany("example-ai");
       expect(outcome.ok).toBe(true);
       expect(outcome.newJobs).toBe(0);
@@ -280,6 +291,7 @@ describe("edited job", () => {
     const edited = jobs.map((j) => (j.id === 70001 ? { ...j, location: { name: "Remote" } } : j));
     stubBoard({ jobs: edited });
     stubTelegram();
+    await backdateSource();
 
     const { outcome } = await pollCompany("example-ai");
     expect(outcome.newJobs).toBe(0);
@@ -304,6 +316,7 @@ describe("Telegram failure recovery", () => {
       updated_at: "2026-08-14T18:30:00Z",
     };
     stubBoard({ jobs: [...jobs, extra] });
+    await backdateSource();
 
     // Telegram is down: 500.
     stubTelegram({ ok: false, status: 500 });
@@ -383,6 +396,38 @@ describe("failure isolation and backoff", () => {
   });
 });
 
+describe("poll interval enforcement", () => {
+  it("skips a company polled too recently (not_due)", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+
+    // First run succeeds and records lastSuccessAt = now.
+    const first = await pollCompany("example-ai");
+    expect(first.outcome.ok).toBe(true);
+
+    // An immediate second manual trigger must be refused, not re-polled.
+    const second = await pollCompany("example-ai");
+    expect(second.outcome.ok).toBe(false);
+    expect(second.outcome.errorCode).toBe("not_due");
+  });
+
+  it("allows a poll after the interval has elapsed", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai");
+
+    // Backdate the last success beyond the 120s interval.
+    await env.DB.prepare(
+      "UPDATE source_state SET last_success_at = ?, last_failure_at = NULL WHERE company_id = ?",
+    )
+      .bind(new Date(Date.now() - 200_000).toISOString(), "example-ai")
+      .run();
+
+    const again = await pollCompany("example-ai");
+    expect(again.outcome.ok).toBe(true);
+  });
+});
+
 describe("API access control", () => {
   it("rejects /api/jobs without a token when DASHBOARD_TOKEN is set", async () => {
     const res = await exports.default.fetch("https://applyrn-worker.test/api/jobs");
@@ -450,6 +495,7 @@ describe("relevance integration", () => {
       updated_at: "2026-08-14T21:00:00Z",
     };
     stubBoard({ jobs: [...jobs, senior] });
+    await backdateSource();
     const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
     stubTelegram({ capture: calls });
 
@@ -476,6 +522,7 @@ describe("relevance integration", () => {
       updated_at: "2026-08-14T21:30:00Z",
     };
     stubBoard({ jobs: [...jobs, relevant] });
+    await backdateSource();
     const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
     stubTelegram({ capture: calls });
 
@@ -506,6 +553,7 @@ describe("bounded notification retry", () => {
     };
     stubBoard({ jobs: [...jobs, extra] });
     stubTelegram({ ok: false, status: 500 }); // Telegram down
+    await backdateSource();
     const first = await pollCompany("example-ai");
     expect(first.outcome.newJobs).toBe(1);
     expect(first.outcome.alertsSent).toBe(0);
@@ -533,6 +581,7 @@ describe("bounded notification retry", () => {
     };
     stubBoard({ jobs: [...jobs, extra] });
     stubTelegram({ ok: false, status: 500 });
+    await backdateSource();
     await pollCompany("example-ai");
 
     // Age the undelivered notification beyond RETRY_MAX_AGE_MS (24h).
@@ -566,10 +615,12 @@ describe("duplicate-send guard", () => {
     stubBoard({ jobs: [...jobs, extra] });
     const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
     stubTelegram({ capture: calls });
+    await backdateSource();
     await pollCompany("example-ai"); // first detection: sends once
     expect(calls).toHaveLength(1);
 
     // Second cycle: job now exists with delivered=1; must not re-send.
+    await backdateSource();
     await pollCompany("example-ai");
     expect(calls).toHaveLength(1);
     expect(await countRows("notifications")).toBe(1);

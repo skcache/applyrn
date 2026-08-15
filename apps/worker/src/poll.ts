@@ -63,6 +63,19 @@ export function backoffSeconds(failureStreak: number): number {
   return Math.min(base + jitter, BACKOFF_MAX_SECONDS);
 }
 
+/** True when a source state shows the company should be polled now. */
+export function isPollDue(
+  state: { lastSuccessAt?: string | null; lastFailureAt?: string | null },
+  intervalSeconds: number,
+  now: string,
+): boolean {
+  const lastPolledAt = state.lastSuccessAt ?? state.lastFailureAt;
+  if (!lastPolledAt) return true;
+  const elapsed = Date.parse(now) - Date.parse(lastPolledAt);
+  if (!Number.isFinite(elapsed) || elapsed < 0) return true;
+  return elapsed >= intervalSeconds * 1000;
+}
+
 /**
  * Serialize poll cycles PER COMPANY so two concurrent runs for the same
  * company cannot double-notify. Different companies still run in parallel
@@ -113,6 +126,14 @@ export class PollService {
     const state = await this.repo.getSourceState(company.id);
     if (state?.backoffUntil && state.backoffUntil > now) {
       outcome.errorCode = "backoff";
+      return outcome;
+    }
+
+    // Enforce the poll interval here (not just in the scheduler) so the
+    // manual API triggers cannot hammer a company (audit F2). The scheduler
+    // filters due companies before calling, so this is a no-op there.
+    if (state && !isPollDue(state, company.pollIntervalSeconds, now)) {
+      outcome.errorCode = "not_due";
       return outcome;
     }
 
