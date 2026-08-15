@@ -62,7 +62,9 @@ packages/
   adapters/     Provider adapters (greenhouse/, ashby/, lever/) + fixtures
   detection/    Baseline + dedupe + lifecycle state machine (pure logic)
   telegram/     Telegram client and message rendering
-migrations/     D1 schema (owned by apps/worker)
+apps/worker/
+  migrations/   D1 schema migrations
+fixtures/       Synthetic example watchlist
 ```
 
 ## Getting started
