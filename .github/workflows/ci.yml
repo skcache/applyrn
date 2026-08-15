@@ -58,7 +58,7 @@ jobs:
 
       - name: Forbidden files must never be tracked
         run: |
-          FORBIDDEN=$(git ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\.|$)|\.env\.[^e]|\.sqlite$|\.db$|engineering-notebook\.html$|^docs/|production-dumps/' || true)
+          FORBIDDEN=$(git ls-files | grep -E '(^|/)(\.env|\.dev\.vars)(\.|$)|\.env\.[^e]|\.sqlite$|\.db$|engineering-notebook\.html$|^docs/|production-dumps/' | grep -vE '\.example$' || true)
           if [ -n "$FORBIDDEN" ]; then
             echo "Forbidden tracked files found:"
             echo "$FORBIDDEN"
