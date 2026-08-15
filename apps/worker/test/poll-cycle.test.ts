@@ -164,7 +164,7 @@ const pollCompany = (id: string) =>
 const pollAll = () =>
   exports.default
     .fetch("https://applyrn-worker.test/api/poll", { method: "POST", headers: AUTH_HEADER })
-    .then((r) => r.json() as Promise<{ results: PollOutcome[] }>);
+    .then((r) => r.json() as Promise<{ summary: { outcomes: PollOutcome[] } }>);
 
 type PollOutcome = {
   companyId: string;
@@ -367,7 +367,7 @@ describe("failure isolation and backoff", () => {
     stubTelegram();
 
     const results = await pollAll();
-    const byCompany = Object.fromEntries(results.results.map((r) => [r.companyId, r]));
+    const byCompany = Object.fromEntries(results.summary.outcomes.map((r) => [r.companyId, r]));
     expect(byCompany["example-ai"]!.ok).toBe(true);
     expect(byCompany["infra-co"]!.ok).toBe(false);
     expect(byCompany["infra-co"]!.errorCode).toBe("server_error");

@@ -62,14 +62,22 @@ export function backoffSeconds(failureStreak: number): number {
   return Math.min(base + jitter, BACKOFF_MAX_SECONDS);
 }
 
-/** Serialize poll cycles so two concurrent runs cannot double-notify. */
+/**
+ * Serialize poll cycles PER COMPANY so two concurrent runs for the same
+ * company cannot double-notify. Different companies still run in parallel
+ * (the scheduler relies on that for bounded concurrency).
+ */
 class CycleGate {
-  private tail: Promise<unknown> = Promise.resolve();
+  private tails = new Map<string, Promise<unknown>>();
 
-  run<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(fn, fn);
+  run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.tails.get(key) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
     // Keep the chain alive even when a cycle rejects.
-    this.tail = next.catch(() => undefined);
+    this.tails.set(
+      key,
+      next.catch(() => undefined),
+    );
     return next;
   }
 }
@@ -83,9 +91,9 @@ export class PollService {
     private readonly env: WorkerEnv,
   ) {}
 
-  /** Serialized entry point: concurrent cycles queue, never interleave. */
+  /** Serialized entry point: concurrent cycles for the same company queue. */
   pollCompany(company: CompanyConfig, now: string): Promise<PollOutcome> {
-    return this.gate.run(() => this.pollCompanyInner(company, now));
+    return this.gate.run(company.id, () => this.pollCompanyInner(company, now));
   }
 
   /**
