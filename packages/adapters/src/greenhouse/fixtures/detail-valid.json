@@ -1,0 +1,11 @@
+{
+  "id": 70001,
+  "title": "Software Engineering Intern",
+  "location": { "name": "San Francisco, CA" },
+  "absolute_url": "https://boards.greenhouse.io/exampleai/jobs/70001",
+  "content": "<p>Join the platform team and build <strong>distributed systems</strong>.</p>",
+  "updated_at": "2026-08-14T17:00:00Z",
+  "first_published": "2026-08-14T17:00:00Z",
+  "department": { "name": "Engineering" },
+  "office": { "name": "San Francisco" }
+}
