@@ -85,6 +85,20 @@ describe("renderAlertText", () => {
     expect(text).not.toContain("🚨 NEW");
   });
 
+  it("truncates oversized text to the Telegram limit with a marker", () => {
+    const payload = buildSendMessagePayload("chat-1", "x".repeat(5000), []);
+    expect(payload.text.length).toBeLessThanOrEqual(4096);
+    expect(payload.text.endsWith("…(truncated)")).toBe(true);
+    // The meaningful head is preserved.
+    expect(payload.text.startsWith("x".repeat(100))).toBe(true);
+  });
+
+  it("leaves text within the limit untouched", () => {
+    const short = "Short alert";
+    const payload = buildSendMessagePayload("chat-1", short, []);
+    expect(payload.text).toBe(short);
+  });
+
   it("never fabricates age for unknown timestamps", () => {
     expect(formatAge("not-a-date", "2026-08-14T17:14:31Z")).toBe("unknown");
   });

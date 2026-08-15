@@ -85,6 +85,21 @@ export type TelegramMessagePayload = {
   disable_web_page_preview?: boolean;
 };
 
+/** Telegram hard limit on message text length (chars). */
+export const TELEGRAM_TEXT_LIMIT = 4096;
+
+/**
+ * Cap text at the Telegram limit (audit F7). A longer message (e.g. a huge
+ * board-supplied title) makes sendMessage fail permanently; the alert would
+ * retry forever and never deliver. Truncate with a marker at the single
+ * payload choke point so both fresh alerts and retries are covered.
+ */
+export function truncateTelegramText(text: string, limit = TELEGRAM_TEXT_LIMIT): string {
+  if (text.length <= limit) return text;
+  const marker = "\n\n…(truncated)";
+  return text.slice(0, limit - marker.length) + marker;
+}
+
 export function buildSendMessagePayload(
   chatId: string,
   text: string,
@@ -92,7 +107,7 @@ export function buildSendMessagePayload(
 ): TelegramMessagePayload {
   const payload: TelegramMessagePayload = {
     chat_id: chatId,
-    text,
+    text: truncateTelegramText(text),
     disable_web_page_preview: true,
   };
   if (buttons.length > 0) {
