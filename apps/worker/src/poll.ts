@@ -311,10 +311,11 @@ export class PollService {
     for (const { job, relevance, kind } of jobs) {
       const id = await jobId(job.provider, job.companyId, job.externalJobId);
 
-      // Duplicate-send guard: if a delivered notification row already exists
-      // (e.g. a previous cycle sent it before a crash), do not send again.
-      const prior = await this.repo.getNotification(id, "telegram");
-      if (prior?.delivered) continue;
+      // Atomic claim (audit F6): the single-statement upsert is the
+      // duplicate-send guard. Only the isolate that wins the claim sends;
+      // a delivered row, or another isolate's in-flight send, refuses it.
+      const claimed = await this.repo.claimNotificationSend(id, "telegram", now);
+      if (!claimed) continue;
 
       const text = renderAlertText({
         job,
@@ -373,6 +374,11 @@ export class PollService {
       if (!job) continue;
       const company = await this.repo.getCompany(job.companyId);
       if (!company) continue;
+      // Claim before sending (audit F6): two isolates retrying the same row
+      // must not both send. A fresh 'sending' marker (crashed peer) is also
+      // refused until it ages out.
+      const claimed = await this.repo.claimNotificationSend(n.jobId, n.channel, now);
+      if (!claimed) continue;
       const client = new TelegramClient(token);
       const storedMatch =
         job.matchScore !== undefined

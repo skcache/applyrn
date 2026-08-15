@@ -614,6 +614,43 @@ describe("API access control", () => {
   });
 });
 
+describe("notification send claim (F6)", () => {
+  it("only one claim wins; delivered rows refuse; stale markers expire", async () => {
+    const now = new Date().toISOString();
+    const r = repo();
+
+    // First isolate claims: inserted as in-flight, wins.
+    expect(await r.claimNotificationSend("job-race-1", "telegram", now)).toBe(true);
+
+    // Second isolate claims immediately: in-flight marker refuses it.
+    expect(await r.claimNotificationSend("job-race-1", "telegram", now)).toBe(false);
+
+    // Winner records delivery; a later claim is refused (duplicate guard).
+    await r.recordNotificationAttempt({
+      jobId: "job-race-1",
+      channel: "telegram",
+      attemptedAt: now,
+      delivered: true,
+    });
+    expect(await r.claimNotificationSend("job-race-1", "telegram", now)).toBe(false);
+
+    // Reopen: delivery reset, claim succeeds again.
+    await r.resetNotificationDelivery("job-race-1", "telegram");
+    expect(await r.claimNotificationSend("job-race-1", "telegram", now)).toBe(true);
+
+    // A crashed isolate leaves a fresh 'sending' marker: refused...
+    expect(await r.claimNotificationSend("job-race-2", "telegram", now)).toBe(true);
+    expect(await r.claimNotificationSend("job-race-2", "telegram", now)).toBe(false);
+
+    // ...until it ages out past the TTL.
+    const stale = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+    await env.DB.exec(
+      `UPDATE notifications SET attempted_at = '${stale}' WHERE job_id = 'job-race-2'`,
+    );
+    expect(await r.claimNotificationSend("job-race-2", "telegram", now)).toBe(true);
+  });
+});
+
 describe("relevance integration", () => {
   it("suppresses a hard-mismatch job from alerts but persists it", async () => {
     stubBoard({ jobs });

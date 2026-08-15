@@ -16,6 +16,13 @@ import {
 
 export type D1Row = Record<string, unknown>;
 
+/**
+ * How long an in-flight notification claim stays fresh (audit F6).
+ * Longer than a Telegram send takes; short enough that a crashed isolate
+ * does not wedge the row forever.
+ */
+export const CLAIM_TTL_MS = 5 * 60 * 1000;
+
 /** Job + company + application, for the dashboard tape and detail view. */
 export type JobView = JobRecord & {
   companyName: string;
@@ -488,6 +495,44 @@ export class D1Repository {
       )
       .bind(jobId, channel)
       .run();
+  }
+
+  /**
+   * Atomically claim the right to send a notification (audit F6).
+   *
+   * Cross-instance duplicate sends happened because the old guard was
+   * read-then-send: two isolates could both see "no delivered row" and both
+   * send. This single-statement upsert is the claim:
+   * - no row          -> inserted as in-flight ('sending'), claim succeeds
+   * - delivered row   -> conflict, WHERE fails, claim fails (duplicate guard)
+   * - in-flight row   -> claim fails while the marker is fresh (another
+   *                      isolate is sending); stale markers (crash) expire
+   *                      after CLAIM_TTL_MS and the claim succeeds again
+   *
+   * Returns true only for the isolate that won the claim; that isolate
+   * must call recordNotificationAttempt with the final state afterwards.
+   */
+  async claimNotificationSend(
+    jobId: string,
+    channel: string,
+    attemptedAt: string,
+  ): Promise<boolean> {
+    const staleBefore = new Date(Date.parse(attemptedAt) - CLAIM_TTL_MS).toISOString();
+    const res = await this.db
+      .prepare(
+        `INSERT INTO notifications (job_id, channel, attempted_at, delivered, latency_ms, error_code)
+         VALUES (?, ?, ?, 0, NULL, 'sending')
+         ON CONFLICT(job_id, channel) DO UPDATE SET
+           attempted_at = excluded.attempted_at,
+           delivered = 0,
+           latency_ms = NULL,
+           error_code = 'sending'
+         WHERE notifications.delivered = 0
+           AND NOT (notifications.error_code = 'sending' AND notifications.attempted_at > ?)`,
+      )
+      .bind(jobId, channel, attemptedAt, staleBefore)
+      .run();
+    return (res.meta?.changes ?? 0) > 0;
   }
 
   async listUndeliveredNotifications(): Promise<NotificationRecord[]> {
