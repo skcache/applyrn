@@ -317,9 +317,11 @@ describe("Telegram failure recovery", () => {
     expect(notifs[0]!.error_code).toBe("http_500");
 
     // Telegram recovers. The retry is throttled, so age the attempt past
-    // RETRY_MIN_INTERVAL_MS (5 min) before the next cycle.
+    // RETRY_MIN_INTERVAL_MS (5 min) but keep it under RETRY_MAX_AGE_MS (24h):
+    // a fixed historical date would go stale as the real clock advances.
+    const aged = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     await env.DB.exec(
-      "UPDATE notifications SET attempted_at = '2026-08-14T17:00:00Z' WHERE delivered = 0",
+      `UPDATE notifications SET attempted_at = '${aged}' WHERE delivered = 0`,
     );
     stubTelegram();
     await pollAll();
