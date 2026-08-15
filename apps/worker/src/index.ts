@@ -5,6 +5,10 @@ import { D1Repository } from "./repo.js";
  * Health + job read path; the poll cycle lands in PR #5.
  */
 
+type WorkerEnv = {
+  DB: D1Database;
+};
+
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export default {
