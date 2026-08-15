@@ -9,6 +9,9 @@ on:
 # secrets are absent (e.g. public forks, pre-setup), the deploy job skips.
 # The owner enables deployment by setting those two secrets.
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy Worker + D1 migrations
