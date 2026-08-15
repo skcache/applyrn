@@ -411,6 +411,24 @@ export class PollService {
     return retried;
   }
 
+  /**
+   * System-level notice (scheduler staleness, etc). Best-effort: returns
+   * false when Telegram is not configured or the send fails; never throws.
+   */
+  async sendSystemAlert(message: string): Promise<boolean> {
+    const token = this.env.TELEGRAM_BOT_TOKEN;
+    const chatId = this.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) return false;
+    try {
+      const client = new TelegramClient(token);
+      const payload = buildSendMessagePayload(chatId, message, []);
+      const result = await client.sendMessage(chatId, payload);
+      return result.ok;
+    } catch {
+      return false;
+    }
+  }
+
   private async fail(
     company: CompanyConfig,
     now: string,

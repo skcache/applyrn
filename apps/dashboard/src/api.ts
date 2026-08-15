@@ -100,6 +100,31 @@ export type SystemStatus = {
   lastPollAt?: string;
 };
 
+export type ObservabilityMetrics = {
+  windowStartedAt: string;
+  cycles: number;
+  companiesPolled: number;
+  successful: number;
+  failed: number;
+  newJobs: number;
+  durationP50Ms: number | null;
+  durationP95Ms: number | null;
+  durationP99Ms: number | null;
+  requestLatencyP50Ms: number | null;
+  requestLatencyP95Ms: number | null;
+  requestLatencyP99Ms: number | null;
+  alertFailures: { error_code: string | null; n: number }[];
+  inactiveConfirmations: number;
+  duplicateNotifications: number;
+  observedLifetimes: {
+    title: string;
+    companyName: string;
+    detectedAt: string;
+    confirmedInactiveAt: string;
+    lifetimeMs: number;
+  }[];
+};
+
 export type ApplicationView = {
   jobId: string;
   status: string;
@@ -129,6 +154,7 @@ export const api = {
   job: (id: string) => request<{ job: JobView }>(`/jobs/${encodeURIComponent(id)}`),
   sources: () => request<{ sources: SourceHealth[] }>("/sources"),
   status: () => request<{ status: SystemStatus }>("/status"),
+  metrics: () => request<{ metrics: ObservabilityMetrics }>("/metrics"),
   applications: () => request<{ applications: ApplicationView[] }>("/applications"),
   setApplicationStatus: (jobId: string, status: ApplicationStatus) =>
     request<{ application: { status: string; appliedAt?: string } }>(

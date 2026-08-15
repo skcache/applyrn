@@ -23,6 +23,78 @@ export type D1Row = Record<string, unknown>;
  */
 export const CLAIM_TTL_MS = 5 * 60 * 1000;
 
+/** One poll_metrics row (PRD 8.6). */
+type PollMetricRow = {
+  provider: string;
+  shard: string;
+  companies_polled: number | null;
+  successful: number | null;
+  failed: number | null;
+  new_jobs: number | null;
+  duration_ms: number | null;
+  request_latency_p50_ms: number | null;
+  request_latency_p95_ms: number | null;
+  request_latency_p99_ms: number | null;
+};
+
+/** Inactive job with enough timing data to observe its posting lifetime. */
+type LifetimeRow = {
+  title: string;
+  company_name: string;
+  detected_at: string;
+  confirmed_inactive_at: string | null;
+  source_published_at: string | null;
+  publication_time_kind: string;
+};
+
+/** system_events row. */
+export type SystemEventRow = {
+  id: number;
+  kind: string;
+  occurred_at: string;
+  message: string | null;
+  cleared_at: string | null;
+};
+
+/** 24h observability report shape (PRD Issue 11). */
+export type ObservabilityReport = {
+  windowStartedAt: string;
+  cycles: number;
+  companiesPolled: number;
+  successful: number;
+  failed: number;
+  newJobs: number;
+  durationP50Ms: number | null;
+  durationP95Ms: number | null;
+  durationP99Ms: number | null;
+  requestLatencyP50Ms: number | null;
+  requestLatencyP95Ms: number | null;
+  requestLatencyP99Ms: number | null;
+  alertFailures: { error_code: string | null; n: number }[];
+  inactiveConfirmations: number;
+  duplicateNotifications: number;
+  observedLifetimes: {
+    title: string;
+    companyName: string;
+    detectedAt: string;
+    confirmedInactiveAt: string;
+    lifetimeMs: number;
+  }[];
+};
+
+/** Nearest-rank percentile over a sorted array; null when empty. */
+export function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  const idx = Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1);
+  return sorted[Math.max(0, idx)] ?? null;
+}
+
+/** Milliseconds between a posting's first appearance and its confirmation. */
+export function lifetimeMs(firstSeenAt: string, confirmedInactiveAt: string): number {
+  const ms = Date.parse(confirmedInactiveAt) - Date.parse(firstSeenAt);
+  return Number.isFinite(ms) && ms >= 0 ? ms : 0;
+}
+
 /** Job + company + application, for the dashboard tape and detail view. */
 export type JobView = JobRecord & {
   companyName: string;
@@ -259,6 +331,134 @@ export class D1Repository {
       cadenceSeconds: Number(cadence?.c ?? DEFAULT_POLL_INTERVAL_SECONDS),
       lastPollAt: last?.t ? String(last.t) : undefined,
     };
+  }
+
+  /**
+   * 24h observability report (PRD Issue 11): cycle volume, latency
+   * percentiles, alert failures, inactive confirmations, and observed
+   * posting lifetimes. Also duplicate-notification count: with the unique
+   * (job_id, channel) index this should always be 0; the soak asserts it.
+   */
+  async getObservability(since: string): Promise<ObservabilityReport> {
+    const [rows, failures, inactive, lifetimes, duplicates] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT provider, shard, companies_polled, successful, failed, new_jobs,
+                  duration_ms, request_latency_p50_ms, request_latency_p95_ms,
+                  request_latency_p99_ms
+           FROM poll_metrics WHERE finished_at >= ? ORDER BY finished_at`,
+        )
+        .bind(since)
+        .all<PollMetricRow>(),
+      this.db
+        .prepare(
+          `SELECT error_code, COUNT(*) AS n
+           FROM notifications WHERE delivered = 0 AND attempted_at >= ?
+           GROUP BY error_code ORDER BY n DESC`,
+        )
+        .bind(since)
+        .all<{ error_code: string | null; n: number }>(),
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM jobs
+           WHERE confirmed_inactive_at IS NOT NULL AND confirmed_inactive_at >= ?`,
+        )
+        .bind(since)
+        .first<{ n: number }>(),
+      this.db
+        .prepare(
+          `SELECT j.title, j.detected_at, j.confirmed_inactive_at,
+                  j.source_published_at, j.publication_time_kind, c.name AS company_name
+           FROM jobs j JOIN companies c ON c.id = j.company_id
+           WHERE j.confirmed_inactive_at IS NOT NULL AND j.confirmed_inactive_at >= ?
+           ORDER BY j.confirmed_inactive_at DESC LIMIT 20`,
+        )
+        .bind(since)
+        .all<LifetimeRow>(),
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT job_id, channel, COUNT(*) AS c
+             FROM notifications WHERE delivered = 1 AND attempted_at >= ?
+             GROUP BY job_id, channel HAVING c > 1
+           )`,
+        )
+        .bind(since)
+        .first<{ n: number }>(),
+    ]);
+
+    const durationMs = rows.results
+      .map((r) => r.duration_ms)
+      .filter((v): v is number => v !== null && v !== undefined)
+      .sort((a, b) => a - b);
+    const p50 = percentile(durationMs, 0.5);
+    const p95 = percentile(durationMs, 0.95);
+    const p99 = percentile(durationMs, 0.99);
+
+    // Latest shard row's request-latency percentiles are the freshest view.
+    const latest = rows.results[rows.results.length - 1];
+
+    return {
+      windowStartedAt: since,
+      cycles: rows.results.length,
+      companiesPolled: rows.results.reduce((s, r) => s + (r.companies_polled ?? 0), 0),
+      successful: rows.results.reduce((s, r) => s + (r.successful ?? 0), 0),
+      failed: rows.results.reduce((s, r) => s + (r.failed ?? 0), 0),
+      newJobs: rows.results.reduce((s, r) => s + (r.new_jobs ?? 0), 0),
+      durationP50Ms: p50,
+      durationP95Ms: p95,
+      durationP99Ms: p99,
+      requestLatencyP50Ms: latest?.request_latency_p50_ms ?? null,
+      requestLatencyP95Ms: latest?.request_latency_p95_ms ?? null,
+      requestLatencyP99Ms: latest?.request_latency_p99_ms ?? null,
+      alertFailures: failures.results,
+      inactiveConfirmations: Number(inactive?.n ?? 0),
+      duplicateNotifications: Number(duplicates?.n ?? 0),
+      observedLifetimes: lifetimes.results.map((r) => ({
+        title: String(r.title),
+        companyName: String(r.company_name),
+        detectedAt: String(r.detected_at),
+        confirmedInactiveAt: String(r.confirmed_inactive_at),
+        // Observed posting lifetime (PRD 10.3/9.2): prefer the source's own
+        // publication time when it exists, else our first-seen time.
+        lifetimeMs: lifetimeMs(r.source_published_at ?? r.detected_at, r.confirmed_inactive_at!),
+      })),
+    };
+  }
+
+  /** Open (un-cleared) system event of a kind, for incident dedupe. */
+  async getOpenSystemEvent(kind: string): Promise<SystemEventRow | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT * FROM system_events WHERE kind = ? AND cleared_at IS NULL
+         ORDER BY occurred_at DESC LIMIT 1`,
+      )
+      .bind(kind)
+      .first<SystemEventRow>();
+    return row ?? null;
+  }
+
+  /** Record a system event (incident open or notice). */
+  async recordSystemEvent(
+    kind: string,
+    occurredAt: string,
+    message?: string,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO system_events (kind, occurred_at, message, cleared_at)
+         VALUES (?, ?, ?, NULL)`,
+      )
+      .bind(kind, occurredAt, message ?? null)
+      .run();
+  }
+
+  /** Clear all open events of a kind (incident recovered). */
+  async clearSystemEvents(kind: string, clearedAt: string): Promise<void> {
+    await this.db
+      .prepare(`UPDATE system_events SET cleared_at = ? WHERE kind = ? AND cleared_at IS NULL`)
+      .bind(clearedAt, kind)
+      .run();
   }
 
   /** Applications joined with job + company, for the APPLICATIONS view. */

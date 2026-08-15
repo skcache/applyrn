@@ -16,6 +16,9 @@ import { PollScheduler } from "./scheduler.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+/** Observability report window: the last 24 hours (PRD Issue 11). */
+const OBSERVABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /**
  * V0 access control (PRD 14): a single shared token. Data/mutating
  * endpoints require `Authorization: Bearer <DASHB...N>`.
@@ -98,6 +101,13 @@ export default {
       if (!(await isAuthorized(request, env))) return unauthorized();
       const status = await repo.getSystemStatus();
       return Response.json({ status }, { headers: JSON_HEADERS });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/metrics") {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const since = new Date(Date.now() - OBSERVABILITY_WINDOW_MS).toISOString();
+      const metrics = await repo.getObservability(since);
+      return Response.json({ metrics }, { headers: JSON_HEADERS });
     }
 
     if (request.method === "GET" && url.pathname === "/api/applications") {

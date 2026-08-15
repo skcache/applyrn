@@ -11,6 +11,7 @@ import {
   type ApplicationStatus,
   type ApplicationView,
   type JobView,
+  type ObservabilityMetrics,
   type SourceHealth,
   type SystemStatus,
 } from "./api";
@@ -432,8 +433,17 @@ function Sources({ sources }: { sources: SourceHealth[] }) {
   );
 }
 
-function Hero({ sys, now }: { sys: SystemStatus | undefined; now: number }) {
+function Hero({
+  sys,
+  metrics,
+  now,
+}: {
+  sys: SystemStatus | undefined;
+  metrics: ObservabilityMetrics | undefined;
+  now: number;
+}) {
   const stale = sys?.lastPollAt ? Date.now() - Date.parse(sys.lastPollAt) > 5 * 60 * 1000 : false;
+  const failureTotal = metrics?.alertFailures.reduce((s, f) => s + f.n, 0) ?? 0;
   return (
     <div className="hero">
       <div className="grid grid-cols-1 gap-x-16 gap-y-12 lg:grid-cols-[1.6fr_1fr] lg:items-end">
@@ -460,6 +470,11 @@ function Hero({ sys, now }: { sys: SystemStatus | undefined; now: number }) {
             >
               last poll {sys?.lastPollAt ? `${ageLabel(sys.lastPollAt, now)} ago` : "never"}
             </p>
+            <p className="mono text-[13px]" style={{ color: "var(--text-3)" }}>
+              {metrics
+                ? `${metrics.cycles} cycles · p95 ${metrics.durationP95Ms ?? "—"}ms · ${failureTotal} failed alerts`
+                : "…"}
+            </p>
           </div>
         </div>
       </div>
@@ -476,6 +491,7 @@ export function App() {
   const jobs = useData(() => api.jobs(), [authed]);
   const sources = useData(() => api.sources(), [authed]);
   const status = useData(() => api.status(), [authed]);
+  const metrics = useData(() => api.metrics(), [authed]);
   const applications = useData(() => api.applications(), [authed, view === "applications"]);
 
   const setStatus = async (jobId: string, s: ApplicationStatus) => {
@@ -546,7 +562,7 @@ export function App() {
         {/* LIVE */}
         {view === "live" && !selected && (
           <div className="flex flex-1 flex-col">
-            <Hero sys={sys} now={now} />
+            <Hero sys={sys} metrics={metrics.data?.metrics} now={now} />
 
             <div style={{ marginTop: "var(--hero-gap)" }}>
               <div className="flex items-baseline justify-between pb-4">

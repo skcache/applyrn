@@ -63,6 +63,28 @@ describe("App gate", () => {
             status: { companyCount: 1, cadenceSeconds: 120, lastPollAt: "2026-08-14T16:59:42Z" },
           });
         }
+        if (path.endsWith("/api/metrics")) {
+          return json({
+            metrics: {
+              windowStartedAt: "2026-08-13T17:00:00Z",
+              cycles: 720,
+              companiesPolled: 720,
+              successful: 715,
+              failed: 5,
+              newJobs: 3,
+              durationP50Ms: 180,
+              durationP95Ms: 410,
+              durationP99Ms: 900,
+              requestLatencyP50Ms: 40,
+              requestLatencyP95Ms: 90,
+              requestLatencyP99Ms: 110,
+              alertFailures: [],
+              inactiveConfirmations: 2,
+              duplicateNotifications: 0,
+              observedLifetimes: [],
+            },
+          });
+        }
         if (path.endsWith("/api/jobs")) {
           return json({
             jobs: [
@@ -102,6 +124,8 @@ describe("App gate", () => {
     expect(screen.getByText(/1 sources/i)).toBeInTheDocument();
     expect(screen.getByText(/120s/)).toBeInTheDocument();
     expect(screen.getByText(/last poll/i)).toBeInTheDocument();
+    expect(screen.getByText(/720 cycles/i)).toBeInTheDocument();
+    expect(screen.getByText(/410ms/)).toBeInTheDocument();
   });
 
   it("rejects a bad token", async () => {

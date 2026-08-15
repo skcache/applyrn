@@ -1,6 +1,7 @@
 import type { CompanyConfig } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
 import type { PollOutcome } from "./poll.js";
+import { log } from "./logger.js";
 
 /**
  * Poll scheduler: the two-minute cycle (PRD section 2.3 / Issue 5).
@@ -23,6 +24,8 @@ import type { PollOutcome } from "./poll.js";
 export interface Poller {
   pollCompany(company: CompanyConfig, now: string): Promise<PollOutcome>;
   retryUndelivered(now: string): Promise<number>;
+  /** System-level notice (e.g. scheduler staleness). Best-effort. */
+  sendSystemAlert(message: string): Promise<boolean>;
 }
 
 /**
@@ -36,6 +39,22 @@ export function shardFor(company: CompanyConfig): string {
 
 /** Max concurrent source fetches per scheduler cycle (free-tier safe). */
 export const CONCURRENCY_LIMIT = 4;
+
+/**
+ * Scheduler is considered stale when no cycle finished within this window.
+ * Cadence is 2 minutes, so 15 minutes = 7 missed cycles (PRD Issue 11
+ * heartbeat; catches a dead cron without false positives during quiet nights
+ * where every company is in backoff).
+ */
+export const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
+
+/** Human-readable duration for stale-incident messages. */
+export function formatAgeMs(ms: number): string {
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
 
 export type CycleSummary = {
   outcomes: PollOutcome[];
@@ -54,6 +73,10 @@ export class PollScheduler implements Poller {
   /** Run one full cycle. Never throws: per-company failures are isolated. */
   async runCycle(now: string): Promise<CycleSummary> {
     const startedAt = Date.now();
+    // Heartbeat baseline: capture the PREVIOUS cycle's finish before this
+    // cycle writes its own metrics row, so staleness is measured against the
+    // cycle that came before, not the one we just completed.
+    const priorStatus = await this.repo.getSystemStatus();
     const companies = await this.repo.listEnabledCompanies();
 
     const due: CompanyConfig[] = [];
@@ -84,13 +107,51 @@ export class PollScheduler implements Poller {
 
     await this.recordMetrics(companies, outcomes, now, Date.now() - startedAt);
 
-    return {
+    const durationMs = Date.now() - startedAt;
+    const summary: CycleSummary = {
       outcomes,
       skippedBackoff,
       skippedInterval,
       retried,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     };
+
+    // Structured cycle summary (PRD Issue 11: scheduler heartbeat). One JSON
+    // line per cycle is the heartbeat: a missing line = a missed cron run.
+    const ok = outcomes.filter((o) => o.ok).length;
+    const failed = outcomes.length - ok;
+    log.info("cycle.completed", {
+      companies: companies.length,
+      polled: outcomes.length,
+      ok,
+      failed,
+      skippedBackoff,
+      skippedInterval,
+      retried,
+      durationMs,
+      newJobs: outcomes.reduce((s, o) => s + o.newJobs, 0),
+    });
+
+    // Heartbeat staleness: if the previous cycle finished longer ago than
+    // the staleness window, the cron may have stopped firing. Record an
+    // incident once (deduped via the open system event); clear on recovery.
+    const status = priorStatus;
+    if (status.lastPollAt) {
+      const ageMs = Date.parse(now) - Date.parse(status.lastPollAt);
+      const open = await this.repo.getOpenSystemEvent("scheduler-stale");
+      if (Number.isFinite(ageMs) && ageMs > HEARTBEAT_STALE_MS && !open) {
+        const message = `scheduler stale: last completed cycle ${formatAgeMs(ageMs)} ago`;
+        await this.repo.recordSystemEvent("scheduler-stale", now, message);
+        log.warn("scheduler.stale", { ageMs, lastPollAt: status.lastPollAt });
+        const sent = await this.poller.sendSystemAlert(`⚠️ ${message}`);
+        if (!sent) log.warn("scheduler.stale.alert_failed", { ageMs });
+      } else if (open && Number.isFinite(ageMs) && ageMs <= HEARTBEAT_STALE_MS) {
+        await this.repo.clearSystemEvents("scheduler-stale", now);
+        log.info("scheduler.recovered", { lastPollAt: status.lastPollAt });
+      }
+    }
+
+    return summary;
   }
 
   /** Poller contract passthrough (single-company manual trigger). */
@@ -100,6 +161,10 @@ export class PollScheduler implements Poller {
 
   retryUndelivered(now: string): Promise<number> {
     return this.poller.retryUndelivered(now);
+  }
+
+  sendSystemAlert(message: string): Promise<boolean> {
+    return this.poller.sendSystemAlert(message);
   }
 
   private async recordMetrics(
