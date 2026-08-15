@@ -156,40 +156,55 @@ export class PollService {
     const existing = await this.repo.listJobsForCompany(company.id);
     const decisions = await detectJobs({ company, fetched, existing, firstRun });
 
-    // Relevance is a convenience layer, not a gate: score every alertable
-    // job, persist the score + reasons, and suppress only hard mismatches.
-    const alertable: {
-      job: NormalizedJob;
-      relevance: RelevanceResult;
-      kind: "new" | "reopened";
-    }[] = [];
-    for (const d of decisions) {
-      // Missing decisions carry no job: they must be dispatched BEFORE the
-      // persist branch, which is keyed on jobOf(d) being non-null. Doing it
-      // the other way silently dropped them (audit F3) and the inactive
-      // lifecycle never advanced, so reposted jobs never re-alerted.
-      if (d.kind === "missing") {
-        await this.repo.markJobAbsent(d.externalJobId, company.id, d.absentCount, now);
-        continue;
+    // Post-fetch zone: everything here talks to D1 or Telegram. A failure
+    // must NOT escape into runCycle and kill the other companies' work or
+    // the undelivered-notification retries (audit F5). We record a source
+    // failure so backoff applies and the cycle stays alive.
+    try {
+      // Relevance is a convenience layer, not a gate: score every alertable
+      // job, persist the score + reasons, and suppress only hard mismatches.
+      const alertable: {
+        job: NormalizedJob;
+        relevance: RelevanceResult;
+        kind: "new" | "reopened";
+      }[] = [];
+      for (const d of decisions) {
+        // Missing decisions carry no job: they must be dispatched BEFORE the
+        // persist branch, which is keyed on jobOf(d) being non-null. Doing it
+        // the other way silently dropped them (audit F3) and the inactive
+        // lifecycle never advanced, so reposted jobs never re-alerted.
+        if (d.kind === "missing") {
+          await this.repo.markJobAbsent(d.externalJobId, company.id, d.absentCount, now);
+          continue;
+        }
+        if (d.kind === "unchanged") {
+          await this.repo.touchJobSeen(d.externalJobId, company.id, now);
+          continue;
+        }
+        const job = jobOf(d);
+        if (!job) continue;
+        const relevance = shouldAlert(d) ? evaluateRelevance(job) : undefined;
+        await this.persistDecision(d, job, now, relevance);
+        if (shouldAlert(d) && relevance && !relevance.suppressed) {
+          alertable.push({ job, relevance, kind: d.kind === "reopened" ? "reopened" : "new" });
+        }
       }
-      if (d.kind === "unchanged") {
-        await this.repo.touchJobSeen(d.externalJobId, company.id, now);
-        continue;
-      }
-      const job = jobOf(d);
-      if (!job) continue;
-      const relevance = shouldAlert(d) ? evaluateRelevance(job) : undefined;
-      await this.persistDecision(d, job, now, relevance);
-      if (shouldAlert(d) && relevance && !relevance.suppressed) {
-        alertable.push({ job, relevance, kind: d.kind === "reopened" ? "reopened" : "new" });
-      }
-    }
 
-    await this.repo.recordSourceSuccess(company.id, now, 200, String(fetched.length));
-    outcome.ok = true;
-    outcome.newJobs = alertable.length;
-    outcome.alertsSent = await this.notifyNew(company, alertable, now);
-    return outcome;
+      await this.repo.recordSourceSuccess(company.id, now, 200, String(fetched.length));
+      outcome.ok = true;
+      outcome.newJobs = alertable.length;
+      outcome.alertsSent = await this.notifyNew(company, alertable, now);
+      return outcome;
+    } catch {
+      outcome.errorCode = "persist_error";
+      // Best-effort failure bookkeeping; never let the escape hatch throw.
+      try {
+        await this.repo.recordSourceFailure(company.id, now, "persist_error");
+      } catch {
+        // DB is down too; nothing more we can do.
+      }
+      return outcome;
+    }
   }
 
   private async enrichDetails(

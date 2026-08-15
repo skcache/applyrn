@@ -394,6 +394,31 @@ describe("failure isolation and backoff", () => {
     expect(outcome.errorCode).toBe("malformed");
     expect(await countRows("jobs")).toBe(0);
   });
+
+  it("a persist failure is contained: no throw, failure recorded, cycle survives", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline (DB healthy)
+
+    // Break the DB for the persist phase: any write now throws. The worker
+    // builds its own repo instance, so spy on the prototype.
+    vi.spyOn(D1Repository.prototype, "recordSourceSuccess").mockRejectedValue(
+      new Error("D1 is down"),
+    );
+    await backdateSource();
+
+    const first = await pollCompany("example-ai");
+    expect(first.outcome.ok).toBe(false);
+    expect(first.outcome.errorCode).toBe("persist_error");
+
+    vi.restoreAllMocks();
+
+    // The failure was recorded as a source failure; next poll is refused
+    // while backoff applies, and the cycle itself never rejected.
+    const state = await repo().getSourceState("example-ai");
+    expect(state?.lastErrorCode).toBe("persist_error");
+    expect(state?.failureStreak).toBeGreaterThan(0);
+  });
 });
 
 describe("inactive/reopen lifecycle", () => {
