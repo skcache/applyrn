@@ -17,6 +17,19 @@ export function clearToken(): void {
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Board-supplied URLs are untrusted (audit F8): only http(s) URLs may be
+ * opened in the dashboard. Mirrors the Telegram button guard.
+ */
+export function isSafeHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export type ApiError = { status: number; message: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

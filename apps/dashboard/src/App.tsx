@@ -5,6 +5,7 @@ import {
   api,
   clearToken,
   getToken,
+  isSafeHttpUrl,
   matchReasons,
   setToken,
   type ApplicationStatus,
@@ -494,7 +495,8 @@ export function App() {
   const sys = status.data?.status;
 
   const open = (url: string) => {
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    // Board-supplied URLs are untrusted (audit F8): only http(s) may open.
+    if (isSafeHttpUrl(url)) window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const go = (v: View) => {

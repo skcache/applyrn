@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../src/App";
-import { ageLabel, matchReasons } from "../src/api";
+import { ageLabel, isSafeHttpUrl, matchReasons } from "../src/api";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -114,6 +114,66 @@ describe("App gate", () => {
     await user.type(screen.getByPlaceholderText("dashboard token"), "wrong");
     await user.click(screen.getByRole("button", { name: /open/i }));
     await waitFor(() => expect(screen.getByText(/rejected/i)).toBeInTheDocument());
+  });
+});
+
+describe("isSafeHttpUrl (F8)", () => {
+  it("accepts https and http URLs", () => {
+    expect(isSafeHttpUrl("https://boards.greenhouse.io/exampleai/jobs/1")).toBe(true);
+    expect(isSafeHttpUrl("http://example.com/jobs/1")).toBe(true);
+  });
+
+  it("rejects javascript:, data:, and malformed URLs", () => {
+    expect(isSafeHttpUrl("javascript:alert(1)")).toBe(false);
+    expect(isSafeHttpUrl("data:text/html,<script>alert(1)</script>")).toBe(false);
+    expect(isSafeHttpUrl("vbscript:msgbox(1)")).toBe(false);
+    expect(isSafeHttpUrl("not a url")).toBe(false);
+    expect(isSafeHttpUrl("")).toBe(false);
+  });
+
+  it("does not open non-http URLs from the tape", async () => {
+    sessionStorage.setItem("applyrn.token", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) => {
+        const path = String(url);
+        if (path.endsWith("/api/status")) {
+          return json({ status: { companyCount: 1, cadenceSeconds: 120 } });
+        }
+        if (path.endsWith("/api/jobs")) {
+          return json({
+            jobs: [
+              {
+                id: "j1",
+                companyId: "c1",
+                companyName: "Example AI",
+                provider: "greenhouse",
+                title: "Malicious Intern",
+                jobUrl: "https://example/j1",
+                applyUrl: "javascript:alert('pwned')",
+                publicationTimeKind: "authoritative",
+                detectedAt: "2026-08-14T16:59:42Z",
+                status: "new",
+                matchScore: 82,
+                matchReasonsJson: '["Internship"]',
+              },
+            ],
+          });
+        }
+        if (path.endsWith("/api/sources")) return json({ sources: [] });
+        throw new Error(`unexpected fetch: ${path}`);
+      }),
+    );
+    const opened = vi.fn();
+    vi.stubGlobal("open", opened);
+
+    render(<App />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByText("Malicious Intern")).toBeInTheDocument());
+    // Open the detail panel (Apply now lives there), then try to apply.
+    await user.click(screen.getByText("Malicious Intern"));
+    await user.click(screen.getByRole("button", { name: /apply now/i }));
+    expect(opened).not.toHaveBeenCalled();
   });
 });
 
