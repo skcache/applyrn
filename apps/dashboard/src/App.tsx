@@ -217,10 +217,12 @@ function TapeRow({
       <div className="opening-inner">
         <span className="opening-age">{ageLabel(job.detectedAt, now)}</span>
         <span className="opening-company">{job.companyName}</span>
-        <span className="opening-match">
-          {job.matchScore !== undefined && job.matchScore !== null ? job.matchScore : "—"}
+        <span className="opening-right">
+          <span className={`opening-match ${(job.matchScore ?? 0) >= 85 ? "top" : ""}`}>
+            {job.matchScore !== undefined && job.matchScore !== null ? job.matchScore : "—"}
+          </span>
+          <span className="opening-source">{job.provider}</span>
         </span>
-        <span className="opening-source">{job.provider}</span>
       </div>
       <div className="opening-role">
         {job.title}
@@ -442,7 +444,9 @@ function Hero({ sys, now }: { sys: SystemStatus | undefined; now: number }) {
           <span className="hero-accent">disappear.</span>
         </h1>
         <div className="lg:justify-self-end lg:pb-2 lg:text-right">
-          <p className="hero-meta">We watch your chosen career feeds every two minutes.</p>
+          <p className="hero-meta">
+            Your feeds, checked every two minutes. New openings get flagged when they appear.
+          </p>
           <div className="mt-8 space-y-2">
             <p className="live-line">Live</p>
             <p className="text-[15px]" style={{ color: "var(--text-2)" }}>
@@ -503,7 +507,9 @@ export function App() {
       <div className="canvas flex min-h-[100dvh] flex-col">
         {/* IDENTITY */}
         <header className="nav">
-          <h1 className="wordmark">ApplyRN</h1>
+          <h1 className="wordmark">
+            APPLY<span style={{ color: "var(--accent)" }}>RN</span>
+          </h1>
           <nav className="nav-links">
             <button
               onClick={() => go("live")}
@@ -587,7 +593,7 @@ export function App() {
         {view === "applications" && (
           <main className="flex-1 py-20">
             <h2 className="page-title">Applications</h2>
-            <p className="page-intro">What you have touched, from detected to offer.</p>
+            <p className="page-intro">Everything I have touched, from detected to offer.</p>
             <div className="mt-12">
               <Applications
                 applications={applications.data?.applications ?? []}
@@ -601,7 +607,7 @@ export function App() {
         {view === "sources" && (
           <main className="flex-1 py-20">
             <h2 className="page-title">Sources</h2>
-            <p className="page-intro">Which career feeds we watch, and how they are doing.</p>
+            <p className="page-intro">The feeds I watch, and how they are doing.</p>
             <div className="mt-12">
               <Sources sources={sources.data?.sources ?? []} />
             </div>
