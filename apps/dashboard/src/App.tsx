@@ -15,13 +15,12 @@ import {
 } from "./api";
 
 /**
- * ApplyRN — an editorial recruiting terminal.
+ * ApplyRN - editorial recruiting terminal (PR #12, pass 2).
  *
- * Visual architecture (PRD 7, PR #12): IDENTITY → SYSTEM STATE → LIVE
- * MARKET → DETAIL. Oversized display type anchors the first viewport;
- * system state is a quiet editorial block, not a utility strip; the feed
- * uses hairline rules instead of a bordered spreadsheet. One warm coral
- * accent, used sparingly. Typography over decoration.
+ * Composition per the "Perfected simplicity" reference: small nav, large
+ * breathing region, massive left headline, small right system block,
+ * deliberately placed content below. One coral accent, locked. Neutral
+ * charcoal, not brown. Instrument Sans display, system mono numerics.
  */
 
 type View = "live" | "applications" | "sources";
@@ -86,7 +85,7 @@ function Gate({ onAuthed }: { onAuthed: () => void }) {
     >
       <div className="w-full max-w-sm">
         <h1 className="wordmark">ApplyRN</h1>
-        <p className="mt-6 text-sm leading-6" style={{ color: "var(--text-2)" }}>
+        <p className="mt-8 text-base leading-7" style={{ color: "var(--text-2)" }}>
           Your recruiting terminal. Enter the dashboard token to open the tape.
         </p>
         <input
@@ -95,17 +94,16 @@ function Gate({ onAuthed }: { onAuthed: () => void }) {
           onChange={(e) => setTokenInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="dashboard token"
-          className="mt-8 w-full border bg-transparent px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--text-3)]"
-          style={{ borderColor: "var(--divider-strong)", color: "var(--text)" }}
+          className="gate-input mt-8"
         />
         {error && (
-          <p className="mt-3 text-xs" style={{ color: "var(--accent)" }}>
+          <p className="mt-3 text-sm" style={{ color: "var(--accent)" }}>
             {error}
           </p>
         )}
         <button
           onClick={submit}
-          className="mt-6 px-5 py-2 text-sm font-medium transition-colors"
+          className="mt-8 text-[15px] font-medium"
           style={{ color: "var(--accent)" }}
         >
           Open →
@@ -115,7 +113,7 @@ function Gate({ onAuthed }: { onAuthed: () => void }) {
   );
 }
 
-/** Small status dropdown used in applications and the detail view. */
+/** Styled status control (intentional select, not a floating native box). */
 function StatusSelect({
   value,
   onChange,
@@ -128,8 +126,8 @@ function StatusSelect({
       value={value ?? "DETECTED"}
       onChange={(e) => onChange(e.target.value as ApplicationStatus)}
       onClick={(e) => e.stopPropagation()}
-      className="w-28 cursor-pointer border bg-transparent px-1.5 py-0.5 text-[11px] uppercase tracking-[0.14em] outline-none transition-colors hover:border-[var(--text-3)] focus:border-[var(--text-3)]"
-      style={{ borderColor: "var(--divider-strong)", color: "var(--text-2)" }}
+      className="status-select"
+      aria-label="Application status"
     >
       {APPLICATION_STATUSES.map((s) => (
         <option key={s} value={s}>
@@ -140,17 +138,11 @@ function StatusSelect({
   );
 }
 
-/** Status as editorial text, not a badge. */
+/** Status as quiet tracked text. Neutral, never accent (accent is reserved). */
 function StatusText({ status }: { status: string | undefined }) {
   if (!status || status === "DETECTED") return null;
   const later = ["APPLIED", "OA", "INTERVIEW", "FINAL", "OFFER"].includes(status);
-  const closed = ["REJECTED", "GHOSTED"].includes(status);
-  const color = closed ? "var(--text-3)" : later ? "var(--accent-soft)" : "var(--text-2)";
-  return (
-    <span className="ml-3 text-[10.5px] font-medium uppercase tracking-[0.18em]" style={{ color }}>
-      {status}
-    </span>
-  );
+  return <span className={`status-text ${later ? "later" : ""}`}>{status}</span>;
 }
 
 function Applications({
@@ -162,36 +154,48 @@ function Applications({
 }) {
   if (applications.length === 0) {
     return (
-      <p className="py-16 text-sm" style={{ color: "var(--text-3)" }}>
+      <p className="py-16 text-base" style={{ color: "var(--text-3)" }}>
         Nothing tracked yet. Set a status on any job in the tape.
       </p>
     );
   }
+
+  const applied = applications.filter((a) => a.appliedAt).length;
+  const inFlight = applications.filter((a) =>
+    ["SAVED", "OA", "INTERVIEW", "FINAL"].includes(a.status),
+  ).length;
+
   return (
-    <div className="sm:grid sm:grid-cols-[1.2fr_1.6fr_auto_auto_auto] sm:gap-x-8">
+    <div style={{ maxWidth: 880 }}>
+      <div className="mb-8 flex items-baseline gap-6" style={{ color: "var(--text-3)" }}>
+        <span className="mono text-[13px]">{applications.length} tracked</span>
+        <span className="mono text-[13px]">{applied} applied</span>
+        <span className="mono text-[13px]">{inFlight} in flight</span>
+      </div>
+
       {applications.map((app, i) => {
         const latency =
           app.appliedAt && app.jobDetectedAt
             ? ageLabel(app.jobDetectedAt, Date.parse(app.appliedAt))
-            : "—";
+            : null;
         return (
-          <div key={app.jobId} className="sm:contents">
-            <div className="py-5 text-[15px]" style={{ color: "var(--text-2)" }}>
-              {app.companyName}
+          <div key={app.jobId}>
+            <div className="ledger-row">
+              <div>
+                <div className="ledger-secondary">{app.companyName}</div>
+                <div className="ledger-primary mt-1">{app.jobTitle}</div>
+              </div>
+              <div className="ledger-meta" style={{ textAlign: "right" }}>
+                {app.appliedAt
+                  ? `applied ${ageLabel(app.appliedAt)}`
+                  : `detected ${ageLabel(app.jobDetectedAt)}`}
+                {latency ? ` · ${latency} to apply` : ""}
+              </div>
+              <div>
+                <StatusSelect value={app.status} onChange={(s) => onStatus(app.jobId, s)} />
+              </div>
             </div>
-            <div className="py-5 text-[15px]" style={{ color: "var(--text)" }}>
-              {app.jobTitle}
-            </div>
-            <div className="py-5">
-              <StatusSelect value={app.status} onChange={(s) => onStatus(app.jobId, s)} />
-            </div>
-            <div className="mono py-5 text-xs" style={{ color: "var(--text-3)" }}>
-              detected {ageLabel(app.jobDetectedAt)}
-            </div>
-            <div className="mono py-5 text-xs" style={{ color: "var(--text-3)" }}>
-              {app.appliedAt ? `applied ${ageLabel(app.appliedAt)} · → ${latency}` : "not applied"}
-            </div>
-            {i < applications.length - 1 && <hr className="rule sm:col-span-5" />}
+            {i < applications.length - 1 && <hr className="rule" />}
           </div>
         );
       })}
@@ -208,56 +212,20 @@ function TapeRow({
   now: number;
   onSelect: (job: JobView) => void;
 }) {
-  const [hover, setHover] = useState(false);
   return (
-    <button
-      onClick={() => onSelect(job)}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className="group w-full cursor-pointer border-0 bg-transparent text-left"
-    >
-      <div className="grid grid-cols-1 gap-x-8 gap-y-1.5 px-1 py-5 transition-colors duration-200 sm:grid-cols-[3.5rem_1.1fr_2.2fr_3.5rem_auto] sm:items-baseline sm:py-6">
-        {/* AGE */}
-        <div className="mono text-xs" style={{ color: hover ? "var(--text-2)" : "var(--text-3)" }}>
-          {ageLabel(job.detectedAt, now)}
-        </div>
-        {/* COMPANY */}
-        <div
-          className="text-[15px] transition-colors duration-200 sm:hidden lg:block"
-          style={{ color: hover ? "var(--text)" : "var(--text-2)" }}
-        >
-          {job.companyName}
-        </div>
-        {/* ROLE */}
-        <div>
-          <span
-            className="text-[17px] font-medium tracking-[-0.01em] transition-colors duration-200"
-            style={{ color: hover ? "var(--text)" : "var(--text)" }}
-          >
-            {job.title}
-          </span>
-          <StatusText status={job.applicationStatus} />
-          <span
-            className="ml-3 text-sm transition-opacity duration-200"
-            style={{ color: "var(--accent)", opacity: hover ? 1 : 0 }}
-          >
-            ↗
-          </span>
-        </div>
-        {/* MATCH */}
-        <div
-          className="mono text-sm text-right transition-colors duration-200"
-          style={{ color: hover ? "var(--text-2)" : "var(--text-3)" }}
-        >
+    <button className="opening" onClick={() => onSelect(job)}>
+      <div className="opening-inner">
+        <span className="opening-age">{ageLabel(job.detectedAt, now)}</span>
+        <span className="opening-company">{job.companyName}</span>
+        <span className="opening-match">
           {job.matchScore !== undefined && job.matchScore !== null ? job.matchScore : "—"}
-        </div>
-        {/* SOURCE */}
-        <div
-          className="text-right text-[11px] uppercase tracking-[0.14em] transition-colors duration-200 sm:block"
-          style={{ color: "var(--text-faint)" }}
-        >
-          {job.provider}
-        </div>
+        </span>
+        <span className="opening-source">{job.provider}</span>
+      </div>
+      <div className="opening-role">
+        {job.title}
+        <StatusText status={job.applicationStatus} />
+        <span className="opening-arrow">↗</span>
       </div>
     </button>
   );
@@ -275,93 +243,139 @@ function Detail({
   onStatus: (status: ApplicationStatus) => void;
 }) {
   const reasons = matchReasons(job);
-  const rows: [string, string][] = [];
-  if (job.location) rows.push(["Location", job.location]);
-  if (job.employmentType) rows.push(["Employment", job.employmentType]);
-  if (job.compensationText) rows.push(["Compensation", job.compensationText]);
-  if (job.department) rows.push(["Department", job.department]);
-  if (job.team) rows.push(["Team", job.team]);
-  rows.push(["Provider", job.provider]);
-  rows.push(["First seen", new Date(job.firstSeenAt).toLocaleString()]);
-  rows.push(["Detected", new Date(job.detectedAt).toLocaleString()]);
-  if (job.publicationTimeKind === "authoritative" && job.sourcePublishedAt) {
-    rows.push(["Published", new Date(job.sourcePublishedAt).toLocaleString()]);
-  }
-  if (job.applicationAppliedAt) {
-    rows.push(["Applied", new Date(job.applicationAppliedAt).toLocaleString()]);
-  }
+  const appliedLatency =
+    job.applicationAppliedAt && job.detectedAt
+      ? ageLabel(job.detectedAt, Date.parse(job.applicationAppliedAt))
+      : null;
+  const detectionLatency =
+    job.publicationTimeKind === "authoritative" && job.sourcePublishedAt
+      ? ageLabel(job.sourcePublishedAt, Date.parse(job.detectedAt))
+      : null;
 
   return (
-    <div>
+    <div className="detail">
       <div className="flex items-baseline justify-between">
         <button onClick={onBack} className="nav-link">
-          ← Tape
+          ← Live
         </button>
-        <span className="section-label">{job.provider}</span>
+        <span className="opening-source">{job.provider}</span>
       </div>
 
-      <p className="mt-14 text-sm" style={{ color: "var(--text-2)" }}>
-        {job.companyName}
-      </p>
-      <h2
-        className="mt-3 text-3xl font-semibold tracking-[-0.02em] sm:text-4xl"
-        style={{ color: "var(--text)" }}
-      >
-        {job.title}
-      </h2>
-
-      {job.matchScore !== undefined && job.matchScore !== null && (
-        <p className="mt-5 text-sm" style={{ color: "var(--text-2)" }}>
-          <span className="mono" style={{ color: "var(--text)" }}>
-            {job.matchScore}
-          </span>{" "}
-          match
-          {reasons.length > 0 && (
-            <span className="ml-3" style={{ color: "var(--text-3)" }}>
-              {reasons.map((r) => `✓ ${r}`).join("  ")}
-            </span>
-          )}
-        </p>
-      )}
-
-      <hr className="rule my-8" />
-
-      <div className="grid grid-cols-1 gap-x-10 gap-y-3 sm:grid-cols-2">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex items-baseline justify-between gap-6 text-sm">
-            <span style={{ color: "var(--text-3)" }}>{k}</span>
-            <span style={{ color: "var(--text-2)" }}>{v}</span>
-          </div>
-        ))}
+      <div className="mt-16">
+        <div className="ledger-secondary">{job.companyName}</div>
+        <h2 className="detail-title mt-3">{job.title}</h2>
+        {job.matchScore !== undefined && job.matchScore !== null && (
+          <p className="mt-5 text-[15px]" style={{ color: "var(--text-2)" }}>
+            <span className="mono" style={{ color: "var(--text)" }}>
+              {job.matchScore}
+            </span>{" "}
+            match
+            {reasons.length > 0 && (
+              <span className="ml-3" style={{ color: "var(--text-3)" }}>
+                {reasons.join(" · ")}
+              </span>
+            )}
+          </p>
+        )}
       </div>
 
       {job.descriptionPlain && (
-        <p className="mt-8 max-w-2xl text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
-          {job.descriptionPlain}
-        </p>
+        <section className="detail-section">
+          <h3 className="detail-section-label">About</h3>
+          <p className="detail-body">{job.descriptionPlain}</p>
+        </section>
       )}
 
-      <div className="mt-12 flex flex-wrap items-center gap-6">
-        <div className="flex items-center gap-3">
-          <span className="section-label">Status</span>
-          <StatusSelect value={job.applicationStatus} onChange={onStatus} />
-        </div>
-        <div className="flex items-center gap-6">
-          <button
-            onClick={() => onOpen(job.applyUrl)}
-            className="text-sm font-medium transition-colors"
-            style={{ color: "var(--accent)" }}
-          >
-            APPLY NOW →
-          </button>
-          <button
-            onClick={() => onOpen(job.jobUrl)}
-            className="nav-link"
-            style={{ color: "var(--text-2)" }}
-          >
-            Details
-          </button>
-        </div>
+      <section className="detail-section">
+        <h3 className="detail-section-label">Details</h3>
+        <dl className="detail-grid">
+          {job.location && (
+            <div className="detail-item">
+              <dt>Location</dt>
+              <dd>{job.location}</dd>
+            </div>
+          )}
+          {job.employmentType && (
+            <div className="detail-item">
+              <dt>Employment</dt>
+              <dd>{job.employmentType}</dd>
+            </div>
+          )}
+          {job.compensationText && (
+            <div className="detail-item">
+              <dt>Compensation</dt>
+              <dd>{job.compensationText}</dd>
+            </div>
+          )}
+          {job.department && (
+            <div className="detail-item">
+              <dt>Department</dt>
+              <dd>{job.department}</dd>
+            </div>
+          )}
+          {job.team && (
+            <div className="detail-item">
+              <dt>Team</dt>
+              <dd>{job.team}</dd>
+            </div>
+          )}
+          <div className="detail-item">
+            <dt>Provider</dt>
+            <dd style={{ textTransform: "capitalize" }}>{job.provider}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="detail-section">
+        <h3 className="detail-section-label">Timing</h3>
+        <dl className="detail-grid">
+          {job.publicationTimeKind === "authoritative" && job.sourcePublishedAt && (
+            <div className="detail-item">
+              <dt>Published</dt>
+              <dd className="mono">{new Date(job.sourcePublishedAt).toLocaleString()}</dd>
+            </div>
+          )}
+          <div className="detail-item">
+            <dt>First seen</dt>
+            <dd className="mono">{new Date(job.firstSeenAt).toLocaleString()}</dd>
+          </div>
+          <div className="detail-item">
+            <dt>Detected</dt>
+            <dd className="mono">{new Date(job.detectedAt).toLocaleString()}</dd>
+          </div>
+          {detectionLatency && (
+            <div className="detail-item">
+              <dt>Detection latency</dt>
+              <dd className="mono">{detectionLatency}</dd>
+            </div>
+          )}
+          {job.applicationAppliedAt && (
+            <div className="detail-item">
+              <dt>Applied</dt>
+              <dd className="mono">{new Date(job.applicationAppliedAt).toLocaleString()}</dd>
+            </div>
+          )}
+          {appliedLatency && (
+            <div className="detail-item">
+              <dt>Apply latency</dt>
+              <dd className="mono">{appliedLatency}</dd>
+            </div>
+          )}
+        </dl>
+      </section>
+
+      <section className="detail-section">
+        <h3 className="detail-section-label">Status</h3>
+        <StatusSelect value={job.applicationStatus} onChange={onStatus} />
+      </section>
+
+      <div className="detail-actions">
+        <button onClick={() => onOpen(job.applyUrl)} className="apply-link">
+          Apply now ↗
+        </button>
+        <button onClick={() => onOpen(job.jobUrl)} className="source-link">
+          Source ↗
+        </button>
       </div>
     </div>
   );
@@ -370,52 +384,44 @@ function Detail({
 function Sources({ sources }: { sources: SourceHealth[] }) {
   if (sources.length === 0) {
     return (
-      <p className="py-16 text-sm" style={{ color: "var(--text-3)" }}>
+      <p className="py-16 text-base" style={{ color: "var(--text-3)" }}>
         No sources configured.
       </p>
     );
   }
   return (
-    <div className="sm:grid sm:grid-cols-[1.6fr_1fr_auto_auto] sm:gap-x-8">
+    <div style={{ maxWidth: 880 }}>
       {sources.map((s, i) => {
         const healthy = s.enabled && !s.backoffUntil && s.failureStreak === 0;
         const backoff = s.enabled && !!s.backoffUntil;
-        const status = !s.enabled
-          ? "disabled"
-          : backoff
-            ? "backoff"
-            : healthy
-              ? "healthy"
-              : "degraded";
-        const statusColor = healthy
-          ? "var(--text-2)"
-          : backoff
-            ? "var(--accent-soft)"
-            : "var(--accent)";
+        const down = !s.enabled || s.failureStreak >= 3;
+        const status = down ? "down" : backoff ? "backoff" : healthy ? "healthy" : "degraded";
         return (
-          <div key={s.companyId} className="sm:contents">
-            <div className="py-5 text-[15px]" style={{ color: "var(--text)" }}>
-              {s.name}
-            </div>
+          <div key={s.companyId}>
             <div
-              className="py-5 text-[11px] uppercase tracking-[0.14em]"
-              style={{ color: "var(--text-faint)" }}
+              className="ledger-row"
+              style={{ gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) auto" }}
             >
-              {s.provider}
+              <div>
+                <div className="ledger-primary">{s.name}</div>
+                <div className="opening-source mt-1" style={{ textAlign: "left" }}>
+                  {s.provider}
+                </div>
+              </div>
+              <div className="ledger-meta" style={{ alignSelf: "center" }}>
+                {s.lastSuccessAt ? `last success ${ageLabel(s.lastSuccessAt)} ago` : "never polled"}
+                {s.failureStreak > 0
+                  ? ` · ${s.failureStreak} failure${s.failureStreak === 1 ? "" : "s"}`
+                  : ""}
+              </div>
+              <div style={{ alignSelf: "center" }}>
+                <span className={`health ${status}`}>
+                  <span className="health-dot" />
+                  {status}
+                </span>
+              </div>
             </div>
-            <div
-              className="py-5 text-[11px] uppercase tracking-[0.18em]"
-              style={{ color: statusColor }}
-            >
-              {status}
-            </div>
-            <div className="mono py-5 text-xs" style={{ color: "var(--text-3)" }}>
-              {s.lastSuccessAt ? `last success ${ageLabel(s.lastSuccessAt)} ago` : "never polled"}
-              {s.failureStreak > 0
-                ? ` · ${s.failureStreak} failure${s.failureStreak === 1 ? "" : "s"}`
-                : ""}
-            </div>
-            {i < sources.length - 1 && <hr className="rule sm:col-span-4" />}
+            {i < sources.length - 1 && <hr className="rule" />}
           </div>
         );
       })}
@@ -426,38 +432,30 @@ function Sources({ sources }: { sources: SourceHealth[] }) {
 function Hero({ sys, now }: { sys: SystemStatus | undefined; now: number }) {
   const stale = sys?.lastPollAt ? Date.now() - Date.parse(sys.lastPollAt) > 5 * 60 * 1000 : false;
   return (
-    <div className="grid grid-cols-1 gap-x-12 gap-y-10 py-16 sm:py-20 lg:grid-cols-[1.7fr_1fr] lg:items-end">
-      <div>
+    <div className="hero">
+      <div className="grid grid-cols-1 gap-x-16 gap-y-12 lg:grid-cols-[1.6fr_1fr] lg:items-end">
         <h1 className="hero-display">
-          Anything
+          Find jobs
           <br />
-          new<span className="hero-accent">?</span>
+          before they
+          <br />
+          <span className="hero-accent">disappear.</span>
         </h1>
-      </div>
-      <div className="lg:justify-self-end lg:pb-3 lg:text-right">
-        <p className="max-w-xs text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
-          Your career feeds, checked{" "}
-          <span style={{ color: "var(--text)" }}>
-            every {sys ? sys.cadenceSeconds : 120} seconds.
-          </span>
-        </p>
-        <div className="mt-8 space-y-1.5">
-          <p
-            className="text-[11px] font-medium uppercase tracking-[0.24em]"
-            style={{ color: "var(--accent)" }}
-          >
-            Live
-          </p>
-          <p className="text-sm" style={{ color: "var(--text-2)" }}>
-            {sys ? `${sys.companyCount} companies` : "…"} ·{" "}
-            <span className="mono">{sys ? `${sys.cadenceSeconds}s` : "120s"}</span> cadence
-          </p>
-          <p
-            className="mono text-sm"
-            style={{ color: stale ? "var(--accent-soft)" : "var(--text-3)" }}
-          >
-            {sys?.lastPollAt ? `last poll ${ageLabel(sys.lastPollAt, now)} ago` : "no polls yet"}
-          </p>
+        <div className="lg:justify-self-end lg:pb-2 lg:text-right">
+          <p className="hero-meta">We watch your chosen career feeds every two minutes.</p>
+          <div className="mt-8 space-y-2">
+            <p className="live-line">Live</p>
+            <p className="text-[15px]" style={{ color: "var(--text-2)" }}>
+              {sys ? `${sys.companyCount} sources` : "…"} ·{" "}
+              <span className="mono">{sys ? `${sys.cadenceSeconds}s` : "120s"}</span>
+            </p>
+            <p
+              className="mono text-[14px]"
+              style={{ color: stale ? "var(--accent-soft)" : "var(--text-3)" }}
+            >
+              last poll {sys?.lastPollAt ? `${ageLabel(sys.lastPollAt, now)} ago` : "never"}
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -495,36 +493,32 @@ export function App() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
 
+  const go = (v: View) => {
+    setView(v);
+    setSelected(null);
+  };
+
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-7 py-10 lg:px-12">
+    <div style={{ background: "var(--bg)", color: "var(--text)", minHeight: "100dvh" }}>
+      <div className="canvas flex min-h-[100dvh] flex-col">
         {/* IDENTITY */}
-        <header className="flex items-baseline justify-between">
+        <header className="nav">
           <h1 className="wordmark">ApplyRN</h1>
-          <nav className="flex items-baseline gap-7 sm:gap-9">
+          <nav className="nav-links">
             <button
-              onClick={() => {
-                setView("live");
-                setSelected(null);
-              }}
+              onClick={() => go("live")}
               className={`nav-link ${view === "live" ? "active" : ""}`}
             >
               Live
             </button>
             <button
-              onClick={() => {
-                setView("applications");
-                setSelected(null);
-              }}
+              onClick={() => go("applications")}
               className={`nav-link ${view === "applications" ? "active" : ""}`}
             >
               Applications
             </button>
             <button
-              onClick={() => {
-                setView("sources");
-                setSelected(null);
-              }}
+              onClick={() => go("sources")}
               className={`nav-link ${view === "sources" ? "active" : ""}`}
             >
               Sources
@@ -541,40 +535,42 @@ export function App() {
           </nav>
         </header>
 
-        {/* LIVE: SYSTEM STATE + MARKET */}
+        {/* LIVE */}
         {view === "live" && !selected && (
-          <>
+          <div className="flex flex-1 flex-col">
             <Hero sys={sys} now={now} />
 
-            <div className="flex items-baseline justify-between pb-3">
-              <span className="section-label">Latest openings</span>
-              {jobs.error && (
-                <span className="text-xs" style={{ color: "var(--accent)" }}>
-                  {jobs.error}
-                </span>
+            <div style={{ marginTop: "var(--hero-gap)" }}>
+              <div className="flex items-baseline justify-between pb-4">
+                <span className="section-label">Latest openings</span>
+                {jobs.error && (
+                  <span className="text-[13px]" style={{ color: "var(--accent)" }}>
+                    {jobs.error}
+                  </span>
+                )}
+              </div>
+              <hr className="rule" />
+
+              {jobs.data && jobs.data.jobs.length === 0 ? (
+                <p className="py-20 text-base" style={{ color: "var(--text-3)" }}>
+                  No jobs detected yet. The tape stays quiet until the first poll finds something.
+                </p>
+              ) : (
+                <div>
+                  {(jobs.data?.jobs ?? []).map((job) => (
+                    <div key={job.id}>
+                      <TapeRow job={job} now={now} onSelect={setSelected} />
+                      <hr className="rule" />
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-            <hr className="rule" />
-
-            {jobs.data && jobs.data.jobs.length === 0 ? (
-              <p className="py-16 text-sm" style={{ color: "var(--text-3)" }}>
-                No jobs detected yet. The tape stays quiet until the first poll finds something.
-              </p>
-            ) : (
-              <div>
-                {(jobs.data?.jobs ?? []).map((job) => (
-                  <div key={job.id}>
-                    <TapeRow job={job} now={now} onSelect={setSelected} />
-                    <hr className="rule" />
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
+          </div>
         )}
 
         {view === "live" && selected && (
-          <main className="flex-1 py-12">
+          <main className="flex-1 py-16">
             <Detail
               job={selected}
               onBack={() => setSelected(null)}
@@ -587,14 +583,11 @@ export function App() {
           </main>
         )}
 
+        {/* APPLICATIONS */}
         {view === "applications" && (
-          <main className="flex-1 py-16">
-            <h2 className="hero-display" style={{ fontSize: "clamp(2rem, 4vw, 3.5rem)" }}>
-              Applications
-            </h2>
-            <p className="mt-4 max-w-md text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
-              What you have touched, from detected to offer.
-            </p>
+          <main className="flex-1 py-20">
+            <h2 className="page-title">Applications</h2>
+            <p className="page-intro">What you have touched, from detected to offer.</p>
             <div className="mt-12">
               <Applications
                 applications={applications.data?.applications ?? []}
@@ -604,23 +597,20 @@ export function App() {
           </main>
         )}
 
+        {/* SOURCES */}
         {view === "sources" && (
-          <main className="flex-1 py-16">
-            <h2 className="hero-display" style={{ fontSize: "clamp(2rem, 4vw, 3.5rem)" }}>
-              Sources
-            </h2>
-            <p className="mt-4 max-w-md text-[15px] leading-7" style={{ color: "var(--text-2)" }}>
-              Which career feeds we watch, and how they are doing.
-            </p>
+          <main className="flex-1 py-20">
+            <h2 className="page-title">Sources</h2>
+            <p className="page-intro">Which career feeds we watch, and how they are doing.</p>
             <div className="mt-12">
               <Sources sources={sources.data?.sources ?? []} />
             </div>
           </main>
         )}
 
-        <footer className="mt-auto pt-16 pb-2">
+        <footer className="mt-auto pb-6 pt-16">
           <hr className="rule mb-5" />
-          <p className="text-xs" style={{ color: "var(--text-faint)" }}>
+          <p className="text-[13px]" style={{ color: "var(--text-faint)" }}>
             Find it early. Apply right now.
           </p>
         </footer>

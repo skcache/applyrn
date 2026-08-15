@@ -1,30 +1,58 @@
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/instrument-sans";
 @import "tailwindcss";
 
 /*
- * ApplyRN design tokens — editorial recruiting terminal.
- * Reference language: warm charcoal, warm off-white, one scarce coral accent,
- * typography over decoration. No pure black/white, no blue.
+ * ApplyRN - editorial recruiting terminal (PR #12, pass 2).
+ *
+ * Reference: "Perfected simplicity" (OKC MEDIA) design language.
+ * Taste-skill dials: DESIGN_VARIANCE 8, MOTION_INTENSITY 3, VISUAL_DENSITY 4.
+ *
+ * Palette: neutral charcoal, soft white, clean coral. No brown, no rust.
+ * Type: Instrument Sans (geometric grotesk), system mono for numerics.
+ * One accent, locked. Em-dash free. Semantic dots only for real health state.
  */
+
 :root {
   color-scheme: dark;
 
-  --bg: #15120e;
-  --surface: #1b1712;
-  --surface-2: #221d16;
-  --divider: rgba(236, 230, 221, 0.09);
-  --divider-strong: rgba(236, 230, 221, 0.16);
+  /* Color system */
+  --bg: #1d1d1d;
+  --surface: #242424;
+  --surface-hover: #2a2a2a;
+  --text: #f3f3f1;
+  --text-2: #a5a5a2;
+  --text-3: #757572;
+  --text-faint: #555553;
+  --divider: rgba(255, 255, 255, 0.08);
+  --divider-strong: rgba(255, 255, 255, 0.14);
+  --accent: #ef6268;
+  --accent-soft: rgba(239, 98, 104, 0.78);
 
-  --text: #ece6dd;
-  --text-2: #a59d90;
-  --text-3: #6f675c;
-  --text-faint: #4a443c;
+  /* Spacing scale (4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 / 96 / 128) */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+  --s9: 96px;
+  --s10: 128px;
 
-  --accent: #ff5c4d;
-  --accent-soft: rgba(255, 92, 77, 0.75);
+  /* Layout primitives */
+  --gutter: clamp(24px, 4vw, 64px);
+  --content-max: 1520px;
+  --nav-h: 72px;
+  --hero-top: clamp(96px, 22vh, 260px);
+  --hero-gap: clamp(64px, 10vh, 128px);
+  --section-gap: 64px;
+  --row-h: 80px;
+  --meta-gap: 8px;
+  --detail-gap: 32px;
 
   --font-display:
-    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    "Instrument Sans Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -42,47 +70,41 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-display);
+  font-size: 16px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Editorial display type for the hero. */
-.hero-display {
-  font-size: clamp(3.5rem, 8vw, 7.5rem);
-  line-height: 0.94;
-  letter-spacing: -0.03em;
-  font-weight: 640;
-  color: var(--text);
-  margin: 0;
+/* ---------- Layout canvas ---------- */
+
+.canvas {
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
 }
 
-.hero-accent {
-  color: var(--accent);
+/* ---------- Navigation ---------- */
+
+.nav {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  height: var(--nav-h);
+  border-bottom: 1px solid var(--divider);
 }
 
-/* Quiet editorial section label, not dashboard chrome. */
-.section-label {
-  font-size: 11px;
-  font-weight: 520;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-/* Hairline rule. */
-.rule {
-  border: 0;
-  border-top: 1px solid var(--divider);
-  margin: 0;
-}
-
-/* Nav wordmark + links. */
 .wordmark {
-  font-weight: 620;
-  letter-spacing: 0.34em;
+  font-weight: 600;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
   font-size: 13px;
   color: var(--text);
+}
+
+.nav-links {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s6);
 }
 
 .nav-link {
@@ -91,27 +113,410 @@ body {
   padding: 0;
   cursor: pointer;
   font-family: inherit;
-  font-size: 12.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  transition: color 160ms ease;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  transition: color 150ms ease;
 }
 .nav-link:hover {
-  color: var(--text-2);
+  color: var(--text);
 }
 .nav-link.active {
   color: var(--accent);
 }
 .nav-link.quiet {
-  color: var(--text-faint);
+  color: var(--text-3);
 }
 .nav-link.quiet:hover {
+  color: var(--text-2);
+}
+
+/* ---------- Hero ---------- */
+
+.hero {
+  padding-top: var(--hero-top);
+}
+
+.hero-display {
+  font-size: clamp(3.5rem, 8.5vw, 7.5rem);
+  line-height: 0.9;
+  letter-spacing: -0.025em;
+  font-weight: 580;
+  color: var(--text);
+  margin: 0;
+}
+
+.hero-accent {
+  color: var(--accent);
+}
+
+.hero-meta {
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1.6;
+  max-width: 34ch;
+}
+
+.live-line {
+  color: var(--accent);
+  font-weight: 550;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+/* ---------- Section labels ---------- */
+
+.section-label {
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
   color: var(--text-3);
 }
 
-/* Mono numerics: ages, scores, latency. */
+/* ---------- Feed ---------- */
+
+.rule {
+  border: 0;
+  border-top: 1px solid var(--divider);
+  margin: 0;
+}
+
+.opening {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 160ms ease;
+}
+.opening:hover {
+  background: var(--surface-hover);
+}
+
+.opening-inner {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto auto;
+  column-gap: var(--s5);
+  align-items: baseline;
+  padding: var(--s4) var(--s3);
+}
+
+@media (max-width: 767px) {
+  .opening-inner {
+    grid-template-columns: 4rem minmax(0, 1fr);
+    row-gap: var(--s2);
+  }
+  .opening-match {
+    text-align: left;
+    grid-column: 2;
+  }
+  .opening-source {
+    grid-column: 2;
+    text-align: left;
+  }
+  .opening-company {
+    white-space: normal;
+  }
+}
+
+.opening-age {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.opening-company {
+  font-size: 15px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opening-match {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--text-3);
+  text-align: right;
+}
+
+.opening-source {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  text-align: right;
+  min-width: 6ch;
+}
+
+.opening-role {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  font-size: 18px;
+  font-weight: 520;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  padding: var(--s1) var(--s3) var(--s4);
+}
+
+.opening-arrow {
+  color: var(--accent);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  font-size: 15px;
+}
+.opening:hover .opening-arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ---------- Status ---------- */
+
+.status-text {
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.status-text.later {
+  color: var(--text-2);
+}
+
+.status-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--divider-strong);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 8px 30px 8px 12px;
+  min-width: 118px;
+  cursor: pointer;
+  border-radius: 0;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    background-color 150ms ease;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
+    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 58%,
+    calc(100% - 9px) 58%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+.status-select:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+/* ---------- Ledgers (applications, sources) ---------- */
+
+.ledger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.8fr) auto auto;
+  column-gap: var(--s5);
+  align-items: baseline;
+  padding: var(--s5) 0;
+}
+
+.ledger-primary {
+  font-size: 16px;
+  color: var(--text);
+}
+.ledger-secondary {
+  font-size: 15px;
+  color: var(--text-2);
+}
+.ledger-meta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ---------- Source health ---------- */
+
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.health-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-3);
+  flex: none;
+}
+.health.degraded .health-dot,
+.health.backoff .health-dot {
+  background: var(--accent);
+}
+.health.down .health-dot {
+  background: var(--accent);
+}
+.health.down {
+  color: var(--accent);
+}
+
+/* ---------- Detail ---------- */
+
+.detail {
+  max-width: 860px;
+}
+
+.detail-title {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 580;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--text);
+  margin: 0;
+}
+
+.detail-section {
+  margin-top: var(--s6);
+}
+.detail-section-label {
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: var(--s3);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--detail-gap);
+  row-gap: var(--s2);
+}
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  font-size: 15px;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--divider);
+}
+.detail-item dt {
+  color: var(--text-3);
+}
+.detail-item dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.detail-body {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--text-2);
+  max-width: 62ch;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s6);
+  margin-top: var(--s7);
+}
+
+.apply-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 550;
+  color: var(--accent);
+}
+.source-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text-2);
+  transition: color 150ms ease;
+}
+.source-link:hover {
+  color: var(--text);
+}
+
+/* ---------- Page titles (non-LIVE views) ---------- */
+
+.page-title {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 580;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--text);
+  margin: 0;
+}
+
+.page-intro {
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1.6;
+  max-width: 44ch;
+  margin-top: var(--s4);
+}
+
+/* ---------- Gate ---------- */
+
+.gate-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--divider-strong);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 10px 12px;
+  outline: none;
+  border-radius: 0;
+  transition: border-color 150ms ease;
+}
+.gate-input::placeholder {
+  color: var(--text-3);
+}
+.gate-input:focus {
+  border-color: var(--text-3);
+}
+
+/* ---------- Utility ---------- */
+
 .mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }
