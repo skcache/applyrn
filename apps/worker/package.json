@@ -5,13 +5,20 @@
   "type": "module",
   "scripts": {
     "build": "wrangler deploy --dry-run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
     "dev": "wrangler dev",
     "db:migrate:local": "wrangler d1 migrations apply applyrn --local"
   },
+  "dependencies": {
+    "@applyrn/domain": "workspace:*"
+  },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
     "@cloudflare/workers-types": "^5.20260815.1",
+    "@types/node": "^22.19.0",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
     "wrangler": "4.123.0"
   }
 }
