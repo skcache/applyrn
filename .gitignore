@@ -11,6 +11,9 @@ docs/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+
+# Soak harness output (PRD Issue 12)
+soak-report.json
 .env
 .env.*
 !.env.example
