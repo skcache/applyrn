@@ -1,0 +1,15 @@
+name = "applyrn-worker"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Poll every 2 minutes (PRD section 2.3). The scheduled handler fans out to
+# enabled companies; per-company backoff lives in source_state.
+[triggers]
+crons = ["*/2 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "applyrn"
+database_id = "local-development-placeholder"
+migrations_dir = "migrations"

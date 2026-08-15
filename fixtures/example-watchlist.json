@@ -1,0 +1,24 @@
+[
+  {
+    "id": "example-ai",
+    "name": "Example AI",
+    "careersUrl": "https://boards.greenhouse.io/exampleai",
+    "provider": "greenhouse",
+    "boardKey": "exampleai",
+    "enabled": true,
+    "pollIntervalSeconds": 120,
+    "tags": ["fixture"],
+    "createdAt": "2026-08-14T00:00:00Z"
+  },
+  {
+    "id": "infra-co",
+    "name": "Infra Co",
+    "careersUrl": "https://boards.greenhouse.io/infraco",
+    "provider": "greenhouse",
+    "boardKey": "infraco",
+    "enabled": true,
+    "pollIntervalSeconds": 120,
+    "tags": ["fixture"],
+    "createdAt": "2026-08-14T00:00:00Z"
+  }
+]

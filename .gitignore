@@ -1,0 +1,42 @@
+# ApplyRN — repository safety
+# Docs must never touch version control (private PRD, private notes)
+docs/
+
+# EDN engineering notebook: always local-only
+/engineering-notebook.html
+/engineering-notebook/
+
+# Local secrets — Cloudflare recommended practice
+# Never commit any .dev.vars or .env variant
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+!.env.example
+
+# Private runtime state (watchlist, recruiting history, dumps)
+data/private/
+config/private/
+production-dumps/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Node / build output
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+
+# Cloudflare / Vercel local state
+.wrangler/
+.vercel/
+
+# Editor / OS noise
+.DS_Store
+*.log
+.idea/
+.vscode/
