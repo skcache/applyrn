@@ -11,5 +11,5 @@ crons = ["*/2 * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "applyrn"
-database_id = "local-development-placeholder"
+database_id = "420a52d5-4d18-4072-ba7a-70dbfb3c6d7d"
 migrations_dir = "migrations"
