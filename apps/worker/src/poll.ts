@@ -1,4 +1,4 @@
-import type { CompanyConfig, NormalizedJob } from "@applyrn/domain";
+import type { CompanyConfig, JobRecord, NormalizedJob } from "@applyrn/domain";
 import { detectJobs, jobOf, shouldAlert, type DetectionDecision } from "@applyrn/detection";
 import { jobId, contentHash } from "@applyrn/domain";
 import { evaluateRelevance, type RelevanceResult } from "@applyrn/relevance";
@@ -161,17 +161,36 @@ export class PollService {
         relevance: RelevanceResult;
         kind: "new" | "reopened";
       }[] = [];
+      // D1 subrequest budget: Cloudflare caps per-invocation API calls
+      // (default ~1000). Per-job round trips blow that on first baseline
+      // (thousands of jobs), so all row writes are collected and flushed
+      // in batches of 100 statements per API call.
+      const existingById = new Map(existing.map((j) => [j.id, j]));
+      const upserts: JobRecord[] = [];
+      const touches: { externalJobId: string; companyId: string; seenAt: string }[] = [];
+      const absents: {
+        externalJobId: string;
+        companyId: string;
+        absentCount: number;
+        now: string;
+      }[] = [];
+      const reopenIds: string[] = [];
       for (const d of decisions) {
         // Missing decisions carry no job: they must be dispatched BEFORE the
         // persist branch, which is keyed on jobOf(d) being non-null. Doing it
         // the other way silently dropped them (audit F3) and the inactive
         // lifecycle never advanced, so reposted jobs never re-alerted.
         if (d.kind === "missing") {
-          await this.repo.markJobAbsent(d.externalJobId, company.id, d.absentCount, now);
+          absents.push({
+            externalJobId: d.externalJobId,
+            companyId: company.id,
+            absentCount: d.absentCount,
+            now,
+          });
           continue;
         }
         if (d.kind === "unchanged") {
-          await this.repo.touchJobSeen(d.externalJobId, company.id, now);
+          touches.push({ externalJobId: d.externalJobId, companyId: company.id, seenAt: now });
           continue;
         }
         const job = jobOf(d);
@@ -187,7 +206,10 @@ export class PollService {
             ? await this.enrichJob(adapter, company, job)
             : job;
         const relevance = shouldAlert(d) ? evaluateRelevance(toPersist) : undefined;
-        await this.persistDecision(d, toPersist, now, relevance);
+        upserts.push(await this.buildJobRecord(d, toPersist, now, relevance, existingById));
+        if (d.kind === "reopened") {
+          reopenIds.push(await jobId(job.provider, job.companyId, job.externalJobId));
+        }
         if (shouldAlert(d) && relevance && !relevance.suppressed) {
           alertable.push({
             job: toPersist,
@@ -195,6 +217,16 @@ export class PollService {
             kind: d.kind === "reopened" ? "reopened" : "new",
           });
         }
+      }
+
+      // Flush everything in as few D1 API calls as possible.
+      await this.repo.batchUpsertJobs(upserts);
+      await this.repo.batchTouchJobSeen(touches);
+      await this.repo.batchMarkJobAbsent(absents);
+      for (const id of reopenIds) {
+        // A reopened job is a NEW posting: the old delivered notification row
+        // (from the first run) must not suppress the fresh alert (audit F4).
+        await this.repo.resetNotificationDelivery(id, "telegram");
       }
 
       await this.repo.recordSourceSuccess(company.id, now, 200, String(fetched.length));
@@ -231,18 +263,20 @@ export class PollService {
     }
   }
 
-  private async persistDecision(
+  /** Build the JobRecord row for a decision (persist happens via batch). */
+  private async buildJobRecord(
     d: DetectionDecision,
     job: NormalizedJob,
     now: string,
-    relevance?: RelevanceResult,
-  ): Promise<void> {
+    relevance: RelevanceResult | undefined,
+    existingById: Map<string, JobRecord>,
+  ): Promise<JobRecord> {
     const id = await jobId(job.provider, job.companyId, job.externalJobId);
     const hash = await contentHash(job);
-    const existing = await this.repo.getJobById(id);
+    const existing = existingById.get(id);
     const isReopen = d.kind === "reopened";
 
-    await this.repo.upsertJob({
+    return {
       id,
       companyId: job.companyId,
       provider: job.provider,
@@ -275,13 +309,7 @@ export class PollService {
               ? "new"
               : "active",
       absentCount: 0,
-    });
-
-    // A reopened job is a NEW posting: the old delivered notification row
-    // (from the first run) must not suppress the fresh alert (audit F4).
-    if (isReopen) {
-      await this.repo.resetNotificationDelivery(id, "telegram");
-    }
+    };
   }
 
   /** Send alerts for new/reopened jobs. Failures persist as undelivered. */

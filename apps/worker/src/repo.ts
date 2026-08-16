@@ -489,7 +489,23 @@ export class D1Repository {
   }
 
   async upsertJob(job: JobRecord): Promise<void> {
-    await this.db
+    await this.upsertJobStmt(job).run();
+  }
+
+  /**
+   * Batched upsert: D1 `batch()` executes up to 100 statements in ONE API
+   * call. Without this, a baseline run (thousands of jobs across 63 boards)
+   * burned one D1 subrequest per job and tripped Cloudflare's per-invocation
+   * request cap (~1000), silently killing the cycle before metrics landed.
+   */
+  async batchUpsertJobs(jobs: JobRecord[]): Promise<void> {
+    for (let i = 0; i < jobs.length; i += 100) {
+      await this.db.batch(jobs.slice(i, i + 100).map((j) => this.upsertJobStmt(j)));
+    }
+  }
+
+  private upsertJobStmt(job: JobRecord) {
+    return this.db
       .prepare(
         `INSERT INTO jobs (
            id, company_id, provider, external_job_id,
@@ -550,19 +566,34 @@ export class D1Repository {
         job.matchReasonsJson ?? null,
         job.status,
         job.absentCount,
-      )
-      .run();
+      );
   }
 
   /** Touch last_seen only; no content changes. */
   async touchJobSeen(externalJobId: string, companyId: string, seenAt: string): Promise<void> {
-    await this.db
+    await this.touchJobSeenStmt(externalJobId, companyId, seenAt).run();
+  }
+
+  /** Batched variant of touchJobSeen (one D1 API call per 100 rows). */
+  async batchTouchJobSeen(
+    entries: { externalJobId: string; companyId: string; seenAt: string }[],
+  ): Promise<void> {
+    for (let i = 0; i < entries.length; i += 100) {
+      await this.db.batch(
+        entries
+          .slice(i, i + 100)
+          .map((e) => this.touchJobSeenStmt(e.externalJobId, e.companyId, e.seenAt)),
+      );
+    }
+  }
+
+  private touchJobSeenStmt(externalJobId: string, companyId: string, seenAt: string) {
+    return this.db
       .prepare(
         `UPDATE jobs SET last_seen_at = ?, absent_count = 0
          WHERE company_id = ? AND external_job_id = ?`,
       )
-      .bind(seenAt, companyId, externalJobId)
-      .run();
+      .bind(seenAt, companyId, externalJobId);
   }
 
   async markJobAbsent(
@@ -571,8 +602,30 @@ export class D1Repository {
     absentCount: number,
     now: string,
   ): Promise<void> {
+    await this.markJobAbsentStmt(externalJobId, companyId, absentCount, now).run();
+  }
+
+  /** Batched variant of markJobAbsent (one D1 API call per 100 rows). */
+  async batchMarkJobAbsent(
+    entries: { externalJobId: string; companyId: string; absentCount: number; now: string }[],
+  ): Promise<void> {
+    for (let i = 0; i < entries.length; i += 100) {
+      await this.db.batch(
+        entries
+          .slice(i, i + 100)
+          .map((e) => this.markJobAbsentStmt(e.externalJobId, e.companyId, e.absentCount, e.now)),
+      );
+    }
+  }
+
+  private markJobAbsentStmt(
+    externalJobId: string,
+    companyId: string,
+    absentCount: number,
+    now: string,
+  ) {
     const nowInactive = absentCount >= 2;
-    await this.db
+    return this.db
       .prepare(
         `UPDATE jobs SET absent_count = ?,
            confirmed_inactive_at = CASE WHEN ? THEN ? ELSE confirmed_inactive_at END,
@@ -580,8 +633,7 @@ export class D1Repository {
            last_seen_at = last_seen_at
          WHERE company_id = ? AND external_job_id = ?`,
       )
-      .bind(absentCount, nowInactive ? 1 : 0, now, nowInactive ? 1 : 0, companyId, externalJobId)
-      .run();
+      .bind(absentCount, nowInactive ? 1 : 0, now, nowInactive ? 1 : 0, companyId, externalJobId);
   }
 
   async getSourceState(companyId: string): Promise<SourceState | null> {
