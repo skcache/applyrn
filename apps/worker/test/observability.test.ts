@@ -57,6 +57,7 @@ async function seedCompany(overrides: Partial<Record<string, unknown>> = {}): Pr
 }
 
 async function seedJob(overrides: Partial<Record<string, unknown>> = {}): Promise<string> {
+  const h = 60 * 60 * 1000;
   const job = {
     id: "job-lifetime-1",
     companyId: company.id,
@@ -66,16 +67,16 @@ async function seedJob(overrides: Partial<Record<string, unknown>> = {}): Promis
     jobUrl: "https://boards.greenhouse.io/exampleai/jobs/1",
     applyUrl: "https://boards.greenhouse.io/exampleai/jobs/1",
     publicationTimeKind: "authoritative",
-    sourcePublishedAt: "2026-08-13T08:00:00Z",
-    firstSeenAt: "2026-08-13T08:00:00Z",
-    detectedAt: "2026-08-13T08:00:00Z",
-    lastSeenAt: "2026-08-15T08:00:00Z",
+    sourcePublishedAt: new Date(Date.now() - 36 * h).toISOString(),
+    firstSeenAt: new Date(Date.now() - 36 * h).toISOString(),
+    detectedAt: new Date(Date.now() - 36 * h).toISOString(),
+    lastSeenAt: new Date(Date.now() - 12 * h).toISOString(),
     contentHash: "abc",
     status: "inactive",
     absentCount: 2,
     matchScore: 90,
     matchReasonsJson: JSON.stringify(["Senior", "Platform"]),
-    confirmedInactiveAt: "2026-08-15T08:30:00Z",
+    confirmedInactiveAt: new Date(Date.now() - 4 * h).toISOString(),
     ...overrides,
   };
   await env.DB.prepare(
@@ -112,8 +113,8 @@ async function seedPollMetric(overrides: Partial<Record<string, unknown>> = {}):
   const metric = {
     provider: "greenhouse",
     shard: "greenhouse",
-    started_at: "2026-08-15T11:58:00Z",
-    finished_at: "2026-08-15T11:59:00Z",
+    started_at: new Date(Date.now() - 120_000).toISOString(),
+    finished_at: new Date(Date.now() - 60_000).toISOString(),
     companies_polled: 1,
     successful: 1,
     failed: 0,
@@ -152,7 +153,7 @@ async function seedNotification(overrides: Partial<Record<string, unknown>> = {}
   const n = {
     job_id: "job-lifetime-1",
     channel: "telegram",
-    attempted_at: "2026-08-15T09:00:00Z",
+    attempted_at: new Date(Date.now() - 60_000).toISOString(),
     delivered: 0,
     latency_ms: 300,
     error_code: "http_400",
@@ -241,7 +242,8 @@ describe("/api/metrics endpoint", () => {
       lifetimeMs: number;
     }[];
     expect(lifetimes[0]!.title).toBe("Senior Platform Engineer");
-    expect(lifetimes[0]!.lifetimeMs).toBe(2 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000);
+    // Authoritative source: confirmedInactiveAt - sourcePublishedAt = 32h.
+    expect(lifetimes[0]!.lifetimeMs).toBe(32 * 60 * 60 * 1000);
   });
 
   it("reports duplicate notifications when the unique index is bypassed", async () => {
@@ -250,8 +252,10 @@ describe("/api/metrics endpoint", () => {
     // report query still counts it if data is inconsistent (soak canary).
     await env.DB.prepare(
       `INSERT INTO notifications (job_id, channel, attempted_at, delivered)
-       VALUES ('other-job', 'telegram', '2026-08-15T09:10:00Z', 1)`,
-    ).run();
+       VALUES ('other-job', 'telegram', ?, 1)`,
+    )
+      .bind(new Date(Date.now() - 60_000).toISOString())
+      .run();
     const r = await get("/api/metrics");
     const metrics = (r.body as { metrics: { duplicateNotifications: number } }).metrics;
     expect(metrics.duplicateNotifications).toBe(0);
