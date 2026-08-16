@@ -18,8 +18,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const PROVIDERS = {
-  greenhouse: (key) =>
-    `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(key)}/jobs`,
+  greenhouse: (key) => `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(key)}/jobs`,
   ashby: (key) => `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(key)}`,
   lever: (key) => `https://api.lever.co/v0/postings/${encodeURIComponent(key)}?mode=json`,
 };
@@ -82,7 +81,9 @@ let failed = 0;
 for (const company of companies) {
   const r = await check(company);
   if (r.ok) {
-    console.log(`  ok   ${company.id.padEnd(24)} ${company.provider.padEnd(11)} ${r.jobs} jobs  ${r.ms}ms`);
+    console.log(
+      `  ok   ${company.id.padEnd(24)} ${company.provider.padEnd(11)} ${r.jobs} jobs  ${r.ms}ms`,
+    );
   } else {
     failed++;
     console.log(`  FAIL ${company.id.padEnd(24)} ${company.provider.padEnd(11)} ${r.error}`);

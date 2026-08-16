@@ -305,7 +305,8 @@ describe("new job detection", () => {
         },
       },
       {
-        match: (url) => url.startsWith("https://boards-api.greenhouse.io/v1/boards/exampleai/jobs/"),
+        match: (url) =>
+          url.startsWith("https://boards-api.greenhouse.io/v1/boards/exampleai/jobs/"),
         handle: () => {
           detailHits++;
           return Promise.resolve(jsonReply({}, 404));

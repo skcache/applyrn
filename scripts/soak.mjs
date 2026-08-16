@@ -108,9 +108,7 @@ async function onePass(pass, prevCycles) {
   return record;
 }
 
-console.log(
-  `soak: ${BASE} · ${MINUTES} min · ${INTERVAL}s interval · report ${REPORT}`,
-);
+console.log(`soak: ${BASE} · ${MINUTES} min · ${INTERVAL}s interval · report ${REPORT}`);
 appendFileSync(REPORT, `{"event":"start","at":"${startedAt}","base":"${BASE}"}\n`);
 
 let pass = 0;
@@ -153,5 +151,7 @@ const report = {
   lastMetrics: events.filter((e) => e.metrics).at(-1)?.metrics ?? null,
 };
 writeFileSync(REPORT, JSON.stringify(report, null, 2) + "\n");
-console.log(`\nsoak ${report.status}: ${events.length} passes, ${violations} violations → ${REPORT}`);
+console.log(
+  `\nsoak ${report.status}: ${events.length} passes, ${violations} violations → ${REPORT}`,
+);
 process.exit(violations === 0 ? 0 : 1);

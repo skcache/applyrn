@@ -189,7 +189,11 @@ export class PollService {
         const relevance = shouldAlert(d) ? evaluateRelevance(toPersist) : undefined;
         await this.persistDecision(d, toPersist, now, relevance);
         if (shouldAlert(d) && relevance && !relevance.suppressed) {
-          alertable.push({ job: toPersist, relevance, kind: d.kind === "reopened" ? "reopened" : "new" });
+          alertable.push({
+            job: toPersist,
+            relevance,
+            kind: d.kind === "reopened" ? "reopened" : "new",
+          });
         }
       }
 

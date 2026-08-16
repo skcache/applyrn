@@ -275,7 +275,12 @@ describe("system events", () => {
 
 describe("scheduler staleness heartbeat", () => {
   class StubPoller {
-    pollCompany = vi.fn(async () => ({ companyId: company.id, ok: true, newJobs: 0, alertsSent: 0 }));
+    pollCompany = vi.fn(async () => ({
+      companyId: company.id,
+      ok: true,
+      newJobs: 0,
+      alertsSent: 0,
+    }));
     retryUndelivered = vi.fn(async () => 0);
     sendSystemAlert = vi.fn(async () => true);
   }

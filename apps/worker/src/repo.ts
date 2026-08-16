@@ -439,11 +439,7 @@ export class D1Repository {
   }
 
   /** Record a system event (incident open or notice). */
-  async recordSystemEvent(
-    kind: string,
-    occurredAt: string,
-    message?: string,
-  ): Promise<void> {
+  async recordSystemEvent(kind: string, occurredAt: string, message?: string): Promise<void> {
     await this.db
       .prepare(
         `INSERT INTO system_events (kind, occurred_at, message, cleared_at)
