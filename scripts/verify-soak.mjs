@@ -58,28 +58,42 @@ async function main() {
     `SELECT COUNT(*) AS n FROM poll_metrics WHERE finished_at >= datetime('now', '-5 minutes')`,
   );
   const recentCycles = Number(recent[0]?.n ?? 0);
-  checks.push({ name: "cycles.advancing", pass: recentCycles > 0, detail: `${recentCycles} in last 5m` });
+  checks.push({
+    name: "cycles.advancing",
+    pass: recentCycles > 0,
+    detail: `${recentCycles} in last 5m`,
+  });
 
   // 2. Zero failure cycles since the clean deploy.
   const failed = runWrangler(
     `SELECT COUNT(*) AS n FROM poll_metrics WHERE failed > 0 AND finished_at >= '${CLEAN_SINCE}'`,
   );
   const failedCycles = Number(failed[0]?.n ?? 0);
-  checks.push({ name: "cycles.zeroFailures", pass: failedCycles === 0, detail: `${failedCycles} failed cycles` });
+  checks.push({
+    name: "cycles.zeroFailures",
+    pass: failedCycles === 0,
+    detail: `${failedCycles} failed cycles`,
+  });
 
   // 3. Zero duplicate delivered notifications.
   const dups = runWrangler(
     `SELECT COUNT(*) AS n FROM (SELECT job_id FROM notifications WHERE delivered = 1 GROUP BY job_id HAVING COUNT(*) > 1)`,
   );
   const dupCount = Number(dups[0]?.n ?? 0);
-  checks.push({ name: "notifications.zeroDuplicates", pass: dupCount === 0, detail: `${dupCount} dupes` });
+  checks.push({
+    name: "notifications.zeroDuplicates",
+    pass: dupCount === 0,
+    detail: `${dupCount} dupes`,
+  });
 
   // 4. Every source readable (no failure streaks).
-  const failing = runWrangler(
-    `SELECT COUNT(*) AS n FROM source_state WHERE failure_streak > 0`,
-  );
+  const failing = runWrangler(`SELECT COUNT(*) AS n FROM source_state WHERE failure_streak > 0`);
   const failingSources = Number(failing[0]?.n ?? 0);
-  checks.push({ name: "sources.readable", pass: failingSources === 0, detail: `${failingSources} failing` });
+  checks.push({
+    name: "sources.readable",
+    pass: failingSources === 0,
+    detail: `${failingSources} failing`,
+  });
 
   // 5. Snapshot totals for the report.
   const totals = runWrangler(
