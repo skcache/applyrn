@@ -20,6 +20,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const wranglerBin = resolve("apps/worker/node_modules/.bin/wrangler");
+
 function pickWatchlist(argv) {
   const fileIdx = argv.indexOf("--file");
   if (fileIdx !== -1 && argv[fileIdx + 1]) return resolve(argv[fileIdx + 1]);
@@ -70,8 +72,9 @@ const sql = sqlFor(companies);
 const target = remote ? "remote D1" : "local D1";
 console.log(`seeding ${companies.length} companies from ${path} into ${target}...`);
 
+// wrangler is a workspace devDependency; locate it without requiring PATH.
 const run = spawnSync(
-  "wrangler",
+  existsSync(wranglerBin) ? wranglerBin : "wrangler",
   ["d1", "execute", "applyrn", remote ? "--remote" : "--local", "--command", sql],
   {
     cwd: resolve("apps/worker"),
