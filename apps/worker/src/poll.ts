@@ -145,13 +145,6 @@ export class PollService {
       return this.fail(company, now, err, outcome, state?.failureStreak ?? 0);
     }
 
-    // Detail enrichment: when a source exposes authoritative timestamps on a
-    // per-job endpoint (Greenhouse first_published), upgrade NEW jobs before
-    // detection so publication -> detection measurement starts clean.
-    if (isDetailCapable(adapter)) {
-      fetched = await this.enrichDetails(adapter, company, fetched);
-    }
-
     const firstRun = !state?.lastSuccessAt;
     const existing = await this.repo.listJobsForCompany(company.id);
     const decisions = await detectJobs({ company, fetched, existing, firstRun });
@@ -183,10 +176,20 @@ export class PollService {
         }
         const job = jobOf(d);
         if (!job) continue;
-        const relevance = shouldAlert(d) ? evaluateRelevance(job) : undefined;
-        await this.persistDecision(d, job, now, relevance);
+        // Detail enrichment applies only to jobs we persist (new/edited/
+        // reopened). Baseline jobs are historical: nothing was "detected"
+        // this run, so authoritative first_published would be noise. Doing
+        // it here instead of over the whole board keeps cycles at cadence
+        // for large boards (one detail fetch per alertable job, not per
+        // job on the board).
+        const toPersist =
+          isDetailCapable(adapter) && d.kind !== "baseline"
+            ? await this.enrichJob(adapter, company, job)
+            : job;
+        const relevance = shouldAlert(d) ? evaluateRelevance(toPersist) : undefined;
+        await this.persistDecision(d, toPersist, now, relevance);
         if (shouldAlert(d) && relevance && !relevance.suppressed) {
-          alertable.push({ job, relevance, kind: d.kind === "reopened" ? "reopened" : "new" });
+          alertable.push({ job: toPersist, relevance, kind: d.kind === "reopened" ? "reopened" : "new" });
         }
       }
 
@@ -207,27 +210,21 @@ export class PollService {
     }
   }
 
-  private async enrichDetails(
+  /** Best-effort authoritative timestamp for one job (Greenhouse first_published). */
+  private async enrichJob(
     adapter: JobSourceAdapter & SupportsJobDetail,
     company: CompanyConfig,
-    fetched: NormalizedJob[],
-  ): Promise<NormalizedJob[]> {
-    const out: NormalizedJob[] = [];
-    for (const job of fetched) {
-      if (job.publicationTimeKind === "authoritative") {
-        out.push(job);
-        continue;
-      }
-      try {
-        const detail = await adapter.fetchJobDetail(company, job.externalJobId);
-        const enriched = await adapter.normalizeDetail(company, detail, job.externalJobId);
-        out.push(enriched ?? job);
-      } catch {
-        // Detail fetch is best-effort; the list entry remains usable.
-        out.push(job);
-      }
+    job: NormalizedJob,
+  ): Promise<NormalizedJob> {
+    if (job.publicationTimeKind === "authoritative") return job;
+    try {
+      const detail = await adapter.fetchJobDetail(company, job.externalJobId);
+      const enriched = await adapter.normalizeDetail(company, detail, job.externalJobId);
+      return enriched ?? job;
+    } catch {
+      // Detail fetch is best-effort; the list entry remains usable.
+      return job;
     }
-    return out;
   }
 
   private async persistDecision(

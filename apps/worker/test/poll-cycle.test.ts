@@ -261,6 +261,64 @@ describe("new job detection", () => {
       "https://boards.greenhouse.io/exampleai/jobs/70004",
     );
   });
+
+  it("enriches a new job with the authoritative publishedAt from its detail endpoint", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline run
+
+    const extra = {
+      id: 70005,
+      title: "Platform Engineer",
+      location: { name: "New York" },
+      absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70005",
+      updated_at: "2026-08-15T09:00:00Z",
+    };
+    stubBoard({ jobs: [...jobs, extra] });
+    await backdateSource();
+    stubTelegram();
+
+    const { outcome } = await pollCompany("example-ai");
+    expect(outcome.newJobs).toBe(1);
+
+    const jobRows = await rows("jobs", "1=1");
+    const enriched = jobRows.find((r) => String(r.external_job_id) === "70005");
+    expect(enriched).toBeDefined();
+    // Detail endpoint returns first_published = updated_at; the persisted
+    // job must carry the authoritative timestamp for lifetime measurement.
+    expect(enriched!.publication_time_kind).toBe("authoritative");
+    expect(enriched!.source_published_at).toBe("2026-08-15T09:00:00Z");
+  });
+
+  it("does not fetch per-job details during the baseline run (cycle stays at cadence)", async () => {
+    // Baseline covers the whole board; detail fetches would be one HTTP
+    // request per job. The first successful poll must only hit the board
+    // list endpoint (perf contract that keeps large boards at cadence).
+    let boardHits = 0;
+    let detailHits = 0;
+    installFetchStub([
+      {
+        match: (url) => url === "https://boards-api.greenhouse.io/v1/boards/exampleai/jobs",
+        handle: () => {
+          boardHits++;
+          return Promise.resolve(jsonReply({ jobs }, 200));
+        },
+      },
+      {
+        match: (url) => url.startsWith("https://boards-api.greenhouse.io/v1/boards/exampleai/jobs/"),
+        handle: () => {
+          detailHits++;
+          return Promise.resolve(jsonReply({}, 404));
+        },
+      },
+    ]);
+    stubTelegram();
+
+    await pollCompany("example-ai");
+    expect(boardHits).toBe(1);
+    expect(detailHits).toBe(0);
+    expect(await countRows("jobs")).toBe(3);
+  });
 });
 
 describe("replay idempotency", () => {
