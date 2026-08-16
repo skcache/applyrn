@@ -41,6 +41,30 @@ export function shardFor(company: CompanyConfig): string {
 export const CONCURRENCY_LIMIT = 4;
 
 /**
+ * Max outbound fetches per invocation. Cloudflare's free plan caps
+ * subrequests at 50 per invocation; one fetch per company per cycle would
+ * exceed that at 63 companies and silently kill the tail of the watchlist
+ * (observed in prod: exactly the last 13 companies failed with `network`).
+ * runCycle rotates company shards across invocations so each invocation
+ * stays under the cap while every company keeps its cadence.
+ */
+export const MAX_FETCHES_PER_INVOCATION = 40;
+
+/** Stable bucket for a company: same id always lands in the same shard. */
+export function companyShard(companyId: string, shardCount: number): number {
+  let h = 0;
+  for (let i = 0; i < companyId.length; i++) {
+    h = (h * 31 + companyId.charCodeAt(i)) >>> 0;
+  }
+  return h % shardCount;
+}
+
+/** Which shard runs on this minute; 1-min cron rotates shards round-robin. */
+export function minuteShard(now: string, shardCount: number): number {
+  return Math.floor(new Date(now).getTime() / 60_000) % shardCount;
+}
+
+/**
  * Scheduler is considered stale when no cycle finished within this window.
  * Cadence is 2 minutes, so 15 minutes = 7 missed cycles (PRD Issue 11
  * heartbeat; catches a dead cron without false positives during quiet nights
@@ -79,11 +103,20 @@ export class PollScheduler implements Poller {
     const priorStatus = await this.repo.getSystemStatus();
     const companies = await this.repo.listEnabledCompanies();
 
+    // Shard the watchlist across invocations (free-plan subrequest cap).
+    // Companies are bucketed stably by id; the shard that runs rotates
+    // every minute, so a company in shard 0 is polled on even minutes and
+    // shard 1 on odd minutes -> every company keeps a ~2-minute cadence
+    // while each invocation stays within MAX_FETCHES_PER_INVOCATION.
+    const shardCount = Math.max(1, Math.ceil(companies.length / MAX_FETCHES_PER_INVOCATION));
+    const shard = minuteShard(now, shardCount);
+    const candidates = companies.filter((c) => companyShard(c.id, shardCount) === shard);
+
     const due: CompanyConfig[] = [];
     let skippedBackoff = 0;
     let skippedInterval = 0;
 
-    for (const company of companies) {
+    for (const company of candidates) {
       const state = await this.repo.getSourceState(company.id);
       if (state?.backoffUntil && state.backoffUntil > now) {
         skippedBackoff++;

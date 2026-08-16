@@ -3,10 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Poll every 2 minutes (PRD section 2.3). The scheduled handler fans out to
-# enabled companies; per-company backoff lives in source_state.
+# Poll every minute; each invocation handles one company shard so the
+# free-plan subrequest cap (50/invocation) is never exceeded at large
+# watchlists. With 2 shards every company is still polled each 2 minutes.
 [triggers]
-crons = ["*/2 * * * *"]
+crons = ["* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

@@ -1,7 +1,13 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { D1Repository, lifetimeMs, percentile } from "../src/repo.js";
-import { HEARTBEAT_STALE_MS, PollScheduler } from "../src/scheduler.js";
+import {
+  HEARTBEAT_STALE_MS,
+  MAX_FETCHES_PER_INVOCATION,
+  PollScheduler,
+  companyShard,
+  minuteShard,
+} from "../src/scheduler.js";
 import type { CompanyConfig } from "@applyrn/domain";
 
 /**
@@ -318,5 +324,70 @@ describe("scheduler staleness heartbeat", () => {
     await scheduler.runCycle(NOW);
     expect(stub.sendSystemAlert).not.toHaveBeenCalled();
     expect(await repo().getOpenSystemEvent("scheduler-stale")).toBeNull();
+  });
+});
+
+describe("watchlist sharding (free-plan subrequest cap)", () => {
+  class RecordPoller {
+    polled: string[] = [];
+    pollCompany = vi.fn(async (c: CompanyConfig) => {
+      this.polled.push(c.id);
+      return { companyId: c.id, ok: true, newJobs: 0, alertsSent: 0 };
+    });
+    retryUndelivered = vi.fn(async () => 0);
+    sendSystemAlert = vi.fn(async () => true);
+  }
+
+  it("buckets companies stably and rotates which shard runs each minute", () => {
+    // Same id always lands in the same bucket; two consecutive minutes
+    // alternate. ShardCount is computed from the watchlist size.
+    const ids = Array.from({ length: 63 }, (_, i) => `company-${String(i).padStart(2, "0")}`);
+    const shardCount = Math.max(1, Math.ceil(ids.length / MAX_FETCHES_PER_INVOCATION));
+    expect(shardCount).toBe(2);
+    for (const id of ids) expect(companyShard(id, shardCount)).toBe(companyShard(id, shardCount));
+    const evenMinute = "2026-08-15T12:00:00.000Z";
+    const oddMinute = "2026-08-15T12:01:00.000Z";
+    expect(minuteShard(evenMinute, shardCount)).not.toBe(minuteShard(oddMinute, shardCount));
+    expect([0, 1]).toContain(minuteShard(evenMinute, shardCount));
+  });
+
+  it("polls only the active shard in a cycle, and every company across two minutes", async () => {
+    // 63 companies => 2 shards => ~32 fetches per invocation (under the 50
+    // subrequest cap). Every company is still polled every 2 minutes.
+    await env.DB.prepare("DELETE FROM companies").run();
+    for (let i = 0; i < 63; i++) {
+      await seedCompany({
+        id: `company-${String(i).padStart(2, "0")}`,
+        name: `Company ${i}`,
+        board_key: `board-${i}`,
+        created_at: "2026-08-14T00:00:00Z",
+      });
+    }
+    const poller = new RecordPoller();
+    const scheduler = new PollScheduler(repo(), poller as never);
+
+    await scheduler.runCycle("2026-08-15T12:00:00.000Z");
+    const first = [...poller.polled];
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.length).toBeLessThan(63); // never the whole watchlist in one go
+    expect(first.length).toBeLessThanOrEqual(MAX_FETCHES_PER_INVOCATION);
+
+    poller.polled.length = 0;
+    await scheduler.runCycle("2026-08-15T12:01:00.000Z");
+    const second = [...poller.polled];
+    expect(second.length).toBeGreaterThan(0);
+    // Union covers the whole watchlist across the two rotations.
+    expect(new Set([...first, ...second]).size).toBe(63);
+    // Shards are disjoint.
+    for (const id of first) expect(second).not.toContain(id);
+  });
+
+  it("handles small watchlists without sharding (shardCount = 1)", async () => {
+    await env.DB.prepare("DELETE FROM companies").run();
+    await seedCompany();
+    const poller = new RecordPoller();
+    const scheduler = new PollScheduler(repo(), poller as never);
+    await scheduler.runCycle(NOW);
+    expect(poller.polled).toContain(company.id); // the single seeded company
   });
 });
