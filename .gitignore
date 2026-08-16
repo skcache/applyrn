@@ -43,3 +43,4 @@ coverage/
 *.log
 .idea/
 .vscode/
+soak-check-report.json
