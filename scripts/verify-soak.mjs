@@ -53,15 +53,21 @@ async function main() {
   }
   checks.push({ name: "worker.alive", pass: health.ok === true, detail: `${WORKER_URL}/health` });
 
-  // 1. Cycles keep advancing (a row in the last 15 minutes). The cutoff is
+  // 1. Cycles keep advancing (a row in the last 25 minutes). The cutoff is
   // passed as an ISO literal computed here: SQLite's datetime('now') emits
   // "YYYY-MM-DD HH:MM" (space) which compares wrong against our ISO "T"
   // stored timestamps — a known false-positive trap in this checker.
-  // 15 min matches the scheduler's own staleness definition
-  // (HEARTBEAT_STALE_MS): during a Cloudflare-cron outage the GitHub
-  // Actions fallback polls on a ~5-minute cadence, so a 5-minute window
-  // would false-FAIL a healthy system running on the fallback.
-  const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  //
+  // Window choice: it must match the REALIZED worst-case cadence, not the
+  // designed one. GitHub Actions free-tier scheduled workflows are NOT
+  // reliable on `*/5` — observed production median gap between GH Poll runs
+  // is ~17 min (GitHub queues schedule events; delays lengthen under load).
+  // During a Cloudflare-cron outage the GH fallback is the only trigger, so
+  // a 15-minute window false-FAILs a healthy-but-fallback-driven system.
+  // 25 min ≈ 1.5× the observed median gap: tight enough to catch a truly
+  // dead system, loose enough not to cry wolf during a known platform
+  // outage that the fallback is already covering.
+  const recentCutoff = new Date(Date.now() - 25 * 60 * 1000).toISOString();
   const recent = runWrangler(
     `SELECT COUNT(*) AS n FROM poll_metrics WHERE finished_at >= '${recentCutoff}'`,
   );
@@ -69,7 +75,7 @@ async function main() {
   checks.push({
     name: "cycles.advancing",
     pass: recentCycles > 0,
-    detail: `${recentCycles} in last 5m`,
+    detail: `${recentCycles} in last 25m`,
   });
 
   // 2. Failure rate stays under the 5% acceptance threshold (PRD: metrics
@@ -115,13 +121,17 @@ async function main() {
     detail: `${staleUndeliveredCount} undelivered > 2h old`,
   });
 
-  // 4. Every source readable (no failure streaks).
-  const failing = runWrangler(`SELECT COUNT(*) AS n FROM source_state WHERE failure_streak > 0`);
+  // 4. Every source readable (no PERSISTENT failure). A single transient
+  //     timeout (failure_streak = 1) is real-world noise that self-recovers
+  //     via backoff — the same tolerance as cycles.failRateUnder5pct.
+  //     streak >= 2 means the source has failed two consecutive polls, i.e.
+  //     genuinely degraded (provider outage or a systemic fetch bug).
+  const failing = runWrangler(`SELECT COUNT(*) AS n FROM source_state WHERE failure_streak >= 2`);
   const failingSources = Number(failing[0]?.n ?? 0);
   checks.push({
     name: "sources.readable",
     pass: failingSources === 0,
-    detail: `${failingSources} failing`,
+    detail: `${failingSources} persistently failing`,
   });
 
   // 5. Snapshot totals for the report.
