@@ -90,6 +90,20 @@ async function main() {
     detail: `${dupCount} dupes`,
   });
 
+  // 3b. No undelivered backlog older than 2h. A growing backlog means the
+  //     alert pipeline is broken (Telegram config, subrequest caps, etc.)
+  //     even though cycles look healthy — the 2026-08-17 soak caught 111
+  //     stuck notifications exactly this way.
+  const staleUndelivered = runWrangler(
+    `SELECT COUNT(*) AS n FROM notifications WHERE delivered = 0 AND attempted_at < '${new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()}'`,
+  );
+  const staleUndeliveredCount = Number(staleUndelivered[0]?.n ?? 0);
+  checks.push({
+    name: "notifications.noStaleUndelivered",
+    pass: staleUndeliveredCount === 0,
+    detail: `${staleUndeliveredCount} undelivered > 2h old`,
+  });
+
   // 4. Every source readable (no failure streaks).
   const failing = runWrangler(`SELECT COUNT(*) AS n FROM source_state WHERE failure_streak > 0`);
   const failingSources = Number(failing[0]?.n ?? 0);
