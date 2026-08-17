@@ -860,6 +860,54 @@ describe("bounded notification retry", () => {
     // Detection persisted; the alert remains retryable for the next cycle.
     expect(await countRows("jobs")).toBe(4);
   });
+
+  it("bounds retry sends per invocation (free-plan subrequest cap)", async () => {
+    // 15 undelivered notifications, all retryable. The retry phase must
+    // not attempt more than MAX_RETRY_SENDS_PER_INVOCATION sends in one
+    // cycle — the poll phase already consumed most of the 50-subrequest
+    // budget (observed in prod: a 108-notification burst became ~35-42
+    // `network` errors per cycle).
+    stubBoard({ jobs });
+    stubTelegram();
+    const now = new Date();
+    const h = 60 * 60 * 1000;
+    for (let i = 0; i < 15; i++) {
+      const jobId = `job-retry-${i}`;
+      await env.DB.prepare(
+        `INSERT INTO jobs (id, company_id, provider, external_job_id, title, job_url, apply_url,
+          publication_time_kind, source_published_at, first_seen_at, detected_at, last_seen_at,
+          content_hash, status, absent_count, match_score, match_reasons_json, confirmed_inactive_at)
+         VALUES (?, 'example-ai', 'greenhouse', ?, ?, 'https://boards.greenhouse.io/exampleai/jobs/x',
+          'https://boards.greenhouse.io/exampleai/jobs/x', 'observed', ?, ?, ?, ?, ?, 'active', 0, NULL, NULL, NULL)`,
+      )
+        .bind(
+          jobId,
+          `ext-retry-${i}`,
+          `Retry Job ${i}`,
+          new Date(now.getTime() - 10 * h).toISOString(),
+          new Date(now.getTime() - 10 * h).toISOString(),
+          new Date(now.getTime() - 10 * h).toISOString(),
+          new Date(now.getTime() - h).toISOString(),
+          `hash-${i}`,
+        )
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO notifications (job_id, channel, attempted_at, delivered, error_code)
+         VALUES (?, 'telegram', ?, 0, 'http_500')`,
+      )
+        .bind(jobId, new Date(now.getTime() - 10 * 60 * 1000).toISOString())
+        .run();
+    }
+    const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubTelegram({ capture: calls });
+    await pollAll();
+    expect(calls.length).toBeLessThanOrEqual(10);
+    expect(calls.length).toBeGreaterThan(0);
+    // 10 succeeded in this cycle; the remaining backlog stays queued
+    // (not lost, not flooded) and drains on later cycles.
+    const pending = await rows("notifications", "delivered = 0");
+    expect(pending.length).toBe(15 - calls.length);
+  });
 });
 
 describe("duplicate-send guard", () => {

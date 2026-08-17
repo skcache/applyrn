@@ -45,6 +45,17 @@ export type PollOutcome = {
 const BACKOFF_BASE_SECONDS = 30;
 const BACKOFF_MAX_SECONDS = 60 * 60;
 
+/**
+ * Max undelivered-notification sends per invocation. The free-plan
+ * subrequest cap is 50 total, and the poll phase already uses up to
+ * MAX_FETCHES_PER_INVOCATION (40); retrying the entire backlog in one
+ * burst would blow the cap and turn every send past it into a `network`
+ * failure (observed in prod: 108 pending notifications, ~35-42 network
+ * errors per cycle, only ~14 sends actually reached Telegram). Retries
+ * trickle at this bound per cycle until the backlog drains.
+ */
+export const MAX_RETRY_SENDS_PER_INVOCATION = 10;
+
 /** Minimum time between delivery attempts for the same notification. */
 export const RETRY_MIN_INTERVAL_MS = 5 * 60 * 1000;
 /** Stop retrying a notification after this age; keep the row for audit. */
@@ -394,7 +405,14 @@ export class PollService {
     const undelivered = await this.repo.listUndeliveredNotifications();
     const nowMs = Date.parse(now);
     let retried = 0;
+    let attempts = 0;
     for (const n of undelivered) {
+      // Bound: never ATTEMPT more than MAX_RETRY_SENDS_PER_INVOCATION in
+      // one invocation (free-plan subrequest cap; the poll phase already
+      // used its budget). Every send is a subrequest whether it succeeds
+      // or fails, so the bound counts attempts, not deliveries. The rest
+      // stay queued and trickle out on later cycles.
+      if (attempts >= MAX_RETRY_SENDS_PER_INVOCATION) break;
       const lastAttemptMs = Date.parse(n.attemptedAt);
       if (!Number.isFinite(lastAttemptMs)) continue;
       if (nowMs - lastAttemptMs < RETRY_MIN_INTERVAL_MS) continue; // throttle
@@ -408,6 +426,7 @@ export class PollService {
       // refused until it ages out.
       const claimed = await this.repo.claimNotificationSend(n.jobId, n.channel, now);
       if (!claimed) continue;
+      attempts++; // a real send follows (claimed); counts against the cap
       const client = new TelegramClient(token);
       const storedMatch =
         job.matchScore !== undefined
