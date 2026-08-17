@@ -269,7 +269,7 @@ describe("new job detection", () => {
 
     const extra = {
       id: 70005,
-      title: "Platform Engineer",
+      title: "Platform Engineering Intern",
       location: { name: "New York" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70005",
       updated_at: "2026-08-15T09:00:00Z",
