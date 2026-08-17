@@ -427,14 +427,27 @@ export class PollService {
         const result = await client.sendMessage(chatId, payload);
         await this.repo.recordNotificationAttempt({
           jobId: job.id,
-          channel: "telegram",
+          channel: n.channel,
           attemptedAt: now,
           delivered: true,
           latencyMs: result.latencyMs,
         });
         retried++;
-      } catch {
-        // Keep the row undelivered; next cycle tries again (throttled).
+      } catch (err) {
+        // Record the failure (observability + soak evidence). The row stays
+        // undelivered and the next cycle tries again (throttled). Audited
+        // code path: F6's claim already ensures only one isolate sends.
+        const code =
+          err instanceof Error && "errorCode" in err
+            ? String((err as { errorCode: string }).errorCode)
+            : "unknown";
+        await this.repo.recordNotificationAttempt({
+          jobId: job.id,
+          channel: n.channel,
+          attemptedAt: now,
+          delivered: false,
+          errorCode: code,
+        });
       }
     }
     return retried;

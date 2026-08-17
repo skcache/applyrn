@@ -249,7 +249,12 @@ describe("/api/metrics endpoint", () => {
     }[];
     expect(lifetimes[0]!.title).toBe("Senior Platform Engineer");
     // Authoritative source: confirmedInactiveAt - sourcePublishedAt = 32h.
-    expect(lifetimes[0]!.lifetimeMs).toBe(32 * 60 * 60 * 1000);
+    // seedJob builds both timestamps from separate Date.now() calls, so the
+    // computed lifetime may skew by a millisecond depending on when the clock
+    // ticked between them — assert within a small window, not exact equality.
+    const h = 60 * 60 * 1000;
+    expect(lifetimes[0]!.lifetimeMs).toBeGreaterThanOrEqual(32 * h - 5);
+    expect(lifetimes[0]!.lifetimeMs).toBeLessThanOrEqual(32 * h + 5);
   });
 
   it("reports duplicate notifications when the unique index is bypassed", async () => {
@@ -389,5 +394,36 @@ describe("watchlist sharding (free-plan subrequest cap)", () => {
     const scheduler = new PollScheduler(repo(), poller as never);
     await scheduler.runCycle(NOW);
     expect(poller.polled).toContain(company.id); // the single seeded company
+  });
+
+  it("honors an explicit shard so an external fallback can cover every shard", async () => {
+    // Same 63-company watchlist => 2 shards. An external trigger (GitHub
+    // Actions poller) uses ?shard=0 and ?shard=1 on separate runs so both
+    // shards are polled even when the minute rotation would not reach them.
+    await env.DB.prepare("DELETE FROM companies").run();
+    for (let i = 0; i < 63; i++) {
+      await seedCompany({
+        id: `company-${String(i).padStart(2, "0")}`,
+        name: `Company ${i}`,
+        board_key: `board-${i}`,
+        created_at: "2026-08-14T00:00:00Z",
+      });
+    }
+    const shardCount = 2;
+
+    const poller0 = new RecordPoller();
+    await new PollScheduler(repo(), poller0 as never).runCycle(NOW, { shard: 0 });
+    const shard0Ids = [...poller0.polled];
+    expect(shard0Ids.length).toBeGreaterThan(0);
+    for (const id of shard0Ids) expect(companyShard(id, shardCount)).toBe(0);
+
+    const poller1 = new RecordPoller();
+    await new PollScheduler(repo(), poller1 as never).runCycle(NOW, { shard: 1 });
+    const shard1Ids = [...poller1.polled];
+    expect(shard1Ids.length).toBeGreaterThan(0);
+    for (const id of shard1Ids) expect(companyShard(id, shardCount)).toBe(1);
+
+    // Union of the two forced runs covers the whole watchlist.
+    expect(new Set([...shard0Ids, ...shard1Ids]).size).toBe(63);
   });
 });

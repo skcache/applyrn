@@ -1,0 +1,41 @@
+name: Poll (redundant trigger)
+
+# Cloudflare's free-plan cron triggers are known to silently stop
+# dispatching (D-011: observed 19h40m dead window during V0 soak). This
+# workflow is the belt-and-suspenders trigger: it POSTs /api/poll on a
+# fixed schedule from GitHub Actions (unlimited on public repos), so the
+# watchlist keeps being polled even when the platform cron goes quiet.
+#
+# Coverage math: the worker shards the watchlist (free-plan subrequest
+# cap), so each call covers one shard. Two staggered schedules with
+# explicit ?shard=0/1 ensure every company is polled within ~5 minutes
+# even if the Cloudflare trigger never fires again.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # every 5 minutes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  poll-shard-0:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll shard 0
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
+            "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll?shard=0"
+        timeout-minutes: 2
+
+  poll-shard-1:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll shard 1
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
+            "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll?shard=1"
+        timeout-minutes: 2

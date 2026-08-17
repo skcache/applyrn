@@ -826,6 +826,40 @@ describe("bounded notification retry", () => {
     expect(notifs[0]!.delivered).toBe(0); // detection still persisted
     expect(await countRows("jobs")).toBe(4);
   });
+
+  it("records the error code when a retry send fails (observability evidence)", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline
+
+    const extra = {
+      id: 70009,
+      title: "Retry Fail Intern",
+      location: { name: "Denver" },
+      absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70009",
+      updated_at: "2026-08-14T21:00:00Z",
+    };
+    stubBoard({ jobs: [...jobs, extra] });
+    stubTelegram({ ok: false, status: 500 }); // Telegram down at first detect
+    await backdateSource();
+    const first = await pollCompany("example-ai");
+    expect(first.outcome.newJobs).toBe(1);
+    expect(first.outcome.alertsSent).toBe(0);
+
+    // Retry cycle: Telegram still down. The failed attempt must be recorded
+    // (error_code), not swallowed, so /api/metrics and the soak checker can
+    // see delivery failures.
+    await env.DB.exec(
+      "UPDATE notifications SET attempted_at = '2026-08-01T00:00:00Z' WHERE delivered = 0",
+    );
+    stubTelegram({ ok: false, status: 500 });
+    await pollAll();
+    const notifs = await rows("notifications", "1=1");
+    expect(notifs[0]!.delivered).toBe(0);
+    expect(String(notifs[0]!.error_code)).toBe("http_500");
+    // Detection persisted; the alert remains retryable for the next cycle.
+    expect(await countRows("jobs")).toBe(4);
+  });
 });
 
 describe("duplicate-send guard", () => {

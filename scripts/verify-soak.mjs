@@ -53,9 +53,13 @@ async function main() {
   }
   checks.push({ name: "worker.alive", pass: health.ok === true, detail: `${WORKER_URL}/health` });
 
-  // 1. Cycles keep advancing (a row in the last 5 minutes).
+  // 1. Cycles keep advancing (a row in the last 5 minutes). The cutoff is
+  // passed as an ISO literal computed here: SQLite's datetime('now') emits
+  // "YYYY-MM-DD HH:MM" (space) which compares wrong against our ISO "T"
+  // stored timestamps — a known false-positive trap in this checker.
+  const recentCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const recent = runWrangler(
-    `SELECT COUNT(*) AS n FROM poll_metrics WHERE finished_at >= datetime('now', '-5 minutes')`,
+    `SELECT COUNT(*) AS n FROM poll_metrics WHERE finished_at >= '${recentCutoff}'`,
   );
   const recentCycles = Number(recent[0]?.n ?? 0);
   checks.push({

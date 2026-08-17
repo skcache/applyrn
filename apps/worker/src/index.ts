@@ -153,7 +153,14 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/api/poll") {
       if (!(await isAuthorized(request, env))) return unauthorized();
-      const summary = await buildScheduler(env).runCycle(new Date().toISOString());
+      // Optional ?shard=N lets an external fallback trigger cover a specific
+      // shard deterministically (GitHub Actions poller), independent of the
+      // minute rotation. Invalid values fall back to the minute shard.
+      const raw = url.searchParams.get("shard");
+      const shard = raw !== null && /^\d+$/.test(raw) ? Number(raw) : undefined;
+      const summary = await buildScheduler(env).runCycle(new Date().toISOString(), {
+        ...(shard !== undefined ? { shard } : {}),
+      });
       return Response.json({ summary }, { headers: JSON_HEADERS });
     }
 

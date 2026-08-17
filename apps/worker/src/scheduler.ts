@@ -95,21 +95,27 @@ export class PollScheduler implements Poller {
   ) {}
 
   /** Run one full cycle. Never throws: per-company failures are isolated. */
-  async runCycle(now: string): Promise<CycleSummary> {
+  async runCycle(now: string, opts?: { shard?: number }): Promise<CycleSummary> {
     const startedAt = Date.now();
     // Heartbeat baseline: capture the PREVIOUS cycle's finish before this
     // cycle writes its own metrics row, so staleness is measured against the
     // cycle that came before, not the one we just completed.
     const priorStatus = await this.repo.getSystemStatus();
     const companies = await this.repo.listEnabledCompanies();
+    const shardCount = Math.max(1, Math.ceil(companies.length / MAX_FETCHES_PER_INVOCATION));
 
     // Shard the watchlist across invocations (free-plan subrequest cap).
     // Companies are bucketed stably by id; the shard that runs rotates
     // every minute, so a company in shard 0 is polled on even minutes and
     // shard 1 on odd minutes -> every company keeps a ~2-minute cadence
     // while each invocation stays within MAX_FETCHES_PER_INVOCATION.
-    const shardCount = Math.max(1, Math.ceil(companies.length / MAX_FETCHES_PER_INVOCATION));
-    const shard = minuteShard(now, shardCount);
+    // An explicit `shard` (from an external fallback trigger such as a
+    // GitHub Actions poller) overrides the minute rotation so a coarser
+    // schedule can still cover every shard deterministically.
+    const shard =
+      opts?.shard !== undefined && opts.shard >= 0 && opts.shard < shardCount
+        ? opts.shard
+        : minuteShard(now, shardCount);
     const candidates = companies.filter((c) => companyShard(c.id, shardCount) === shard);
 
     const due: CompanyConfig[] = [];
