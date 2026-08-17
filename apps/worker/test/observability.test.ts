@@ -397,11 +397,12 @@ describe("watchlist sharding (free-plan subrequest cap)", () => {
   });
 
   it("honors an explicit shard so an external fallback can cover every shard", async () => {
-    // Same 63-company watchlist => 2 shards. An external trigger (GitHub
-    // Actions poller) uses ?shard=0 and ?shard=1 on separate runs so both
-    // shards are polled even when the minute rotation would not reach them.
+    // 41 companies => shardCount 2 (cheaper than 63 — the behavior is
+    // identical). An external trigger (GitHub Actions poller) uses
+    // ?shard=0 and ?shard=1 on separate runs so both shards are polled
+    // even when the minute rotation would not reach them.
     await env.DB.prepare("DELETE FROM companies").run();
-    for (let i = 0; i < 63; i++) {
+    for (let i = 0; i < 41; i++) {
       await seedCompany({
         id: `company-${String(i).padStart(2, "0")}`,
         name: `Company ${i}`,
@@ -424,6 +425,6 @@ describe("watchlist sharding (free-plan subrequest cap)", () => {
     for (const id of shard1Ids) expect(companyShard(id, shardCount)).toBe(1);
 
     // Union of the two forced runs covers the whole watchlist.
-    expect(new Set([...shard0Ids, ...shard1Ids]).size).toBe(63);
+    expect(new Set([...shard0Ids, ...shard1Ids]).size).toBe(41);
   });
 });

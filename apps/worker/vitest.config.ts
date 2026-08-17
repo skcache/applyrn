@@ -26,5 +26,11 @@ export default defineConfig({
   test: {
     dir: "test",
     setupFiles: ["./test/apply-migrations.ts"],
+    // Seed-heavy integration tests (63-company watchlists, 100-replay
+    // idempotency) run slower on CI than on a dev Mac. The 5s default was
+    // a timeout cascade risk: a timed-out test aborts mid-cycle and leaks
+    // state into the next test in the file.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });
