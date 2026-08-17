@@ -68,15 +68,22 @@ async function main() {
     detail: `${recentCycles} in last 5m`,
   });
 
-  // 2. Zero failure cycles since the clean deploy.
-  const failed = runWrangler(
-    `SELECT COUNT(*) AS n FROM poll_metrics WHERE failed > 0 AND finished_at >= '${CLEAN_SINCE}'`,
+  // 2. Failure rate stays under the 5% acceptance threshold (PRD: metrics
+  //     show <5% failure rate across 24h). Strict-zero is wrong for live
+  //     boards: single sources blip (network, 5xx) and self-recover via
+  //     backoff — that's the system working. 5%+ is a systemic problem
+  //     (dead cron, subrequest caps, provider outage).
+  const failstats = runWrangler(
+    `SELECT COALESCE(SUM(companies_polled),0) AS polled, COALESCE(SUM(failed),0) AS failed
+     FROM poll_metrics WHERE finished_at >= '${CLEAN_SINCE}'`,
   );
-  const failedCycles = Number(failed[0]?.n ?? 0);
+  const polledTotal = Number(failstats[0]?.polled ?? 0);
+  const failedTotal = Number(failstats[0]?.failed ?? 0);
+  const failRate = polledTotal > 0 ? (failedTotal / polledTotal) * 100 : 0;
   checks.push({
-    name: "cycles.zeroFailures",
-    pass: failedCycles === 0,
-    detail: `${failedCycles} failed cycles`,
+    name: "cycles.failRateUnder5pct",
+    pass: failRate < 5,
+    detail: `${failedTotal}/${polledTotal} polls failed (${failRate.toFixed(2)}%)`,
   });
 
   // 3. Zero duplicate delivered notifications.
