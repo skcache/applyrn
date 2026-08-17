@@ -53,11 +53,15 @@ async function main() {
   }
   checks.push({ name: "worker.alive", pass: health.ok === true, detail: `${WORKER_URL}/health` });
 
-  // 1. Cycles keep advancing (a row in the last 5 minutes). The cutoff is
+  // 1. Cycles keep advancing (a row in the last 15 minutes). The cutoff is
   // passed as an ISO literal computed here: SQLite's datetime('now') emits
   // "YYYY-MM-DD HH:MM" (space) which compares wrong against our ISO "T"
   // stored timestamps — a known false-positive trap in this checker.
-  const recentCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  // 15 min matches the scheduler's own staleness definition
+  // (HEARTBEAT_STALE_MS): during a Cloudflare-cron outage the GitHub
+  // Actions fallback polls on a ~5-minute cadence, so a 5-minute window
+  // would false-FAIL a healthy system running on the fallback.
+  const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const recent = runWrangler(
     `SELECT COUNT(*) AS n FROM poll_metrics WHERE finished_at >= '${recentCutoff}'`,
   );

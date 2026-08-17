@@ -42,7 +42,7 @@ jobs:
           else
             AGE=$((NOW - $(date -u -d "$LAST" +%s)))
             echo "last poll age: ${AGE}s"
-            if [ "$AGE" -gt 300 ]; then
+            if [ "$AGE" -gt 180 ]; then
               echo "stale=true" >> "$GITHUB_OUTPUT"
             else
               echo "stale=false" >> "$GITHUB_OUTPUT"
