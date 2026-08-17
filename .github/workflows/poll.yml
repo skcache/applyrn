@@ -6,10 +6,14 @@ name: Poll (redundant trigger)
 # fixed schedule from GitHub Actions (unlimited on public repos), so the
 # watchlist keeps being polled even when the platform cron goes quiet.
 #
+# Fallback semantics: each run first checks /api/status.lastPollAt. If a
+# cycle completed recently (the primary Cloudflare cron is healthy), the
+# run stands down. Only when cycles are stale does it poll the watchlist,
+# so the two triggers never overlap and double-fire the same companies.
+#
 # Coverage math: the worker shards the watchlist (free-plan subrequest
-# cap), so each call covers one shard. Two staggered schedules with
-# explicit ?shard=0/1 ensure every company is polled within ~5 minutes
-# even if the Cloudflare trigger never fires again.
+# cap), so each call covers one shard. Two jobs with explicit ?shard=0/1
+# ensure every company is polled within ~5 minutes of a detected gap.
 
 on:
   schedule:
@@ -20,7 +24,34 @@ permissions:
   contents: read
 
 jobs:
+  check-staleness:
+    runs-on: ubuntu-latest
+    outputs:
+      stale: ${{ steps.check.outputs.stale }}
+    steps:
+      - name: Check whether the primary cron is still cycling
+        id: check
+        run: |
+          STATUS=$(curl -fsS \
+            -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
+            "https://applyrn-worker.siddhankuwar116.workers.dev/api/status")
+          LAST=$(echo "$STATUS" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const s=JSON.parse(d).status; console.log(s.lastPollAt ?? "")})')
+          NOW=$(date -u +%s)
+          if [ -z "$LAST" ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            AGE=$((NOW - $(date -u -d "$LAST" +%s)))
+            echo "last poll age: ${AGE}s"
+            if [ "$AGE" -gt 300 ]; then
+              echo "stale=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "stale=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
   poll-shard-0:
+    needs: check-staleness
+    if: needs.check-staleness.outputs.stale == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Poll shard 0
@@ -31,6 +62,8 @@ jobs:
         timeout-minutes: 2
 
   poll-shard-1:
+    needs: check-staleness
+    if: needs.check-staleness.outputs.stale == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Poll shard 1
