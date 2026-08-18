@@ -252,9 +252,10 @@ export const NON_US_REGIONS = [
 ] as const;
 
 /**
- * Early-career markers. A title must contain at least one of these for the
- * role to be in scope (matches the user's stated scope: internships,
- * co-ops, apprenticeships, work study, new grad, early career).
+ * Early-career markers. A title/description containing any of these, or an
+ * explicit experience requirement of at most MAX_EXPERIENCE_YEARS, puts the
+ * role in scope. Scope is BOTH internships/co-ops AND full-time new-grad /
+ * early-career roles (0-2 YoE), per the user.
  */
 export const EARLY_CAREER_MARKERS = [
   "intern",
@@ -270,6 +271,7 @@ export const EARLY_CAREER_MARKERS = [
   "early career",
   "entry level",
   "entry-level",
+  "recent grad",
   "graduate",
   "university",
   "undergrad",
@@ -280,8 +282,22 @@ export const EARLY_CAREER_MARKERS = [
   "jr.",
   "new hire",
   "student",
-  "recent grad",
+  "software engineer i",
+  "software engineer 1",
+  "developer i",
+  "developer 1",
+  "swe i",
+  "swe 1",
+  "engineer i",
+  "engineer 1",
+  "level i",
+  "level 1",
+  "l1",
+  "l3",
 ] as const;
+
+/** Hard cap on stated years-of-experience requirements (0-2 YoE allowed). */
+export const MAX_EXPERIENCE_YEARS = 2;
 
 /**
  * Seniority / leadership markers that put a role out of early-career scope.
@@ -411,6 +427,23 @@ export const NON_ENGINEERING_ROLE_MARKERS = [
   "customer success",
   "customer support",
   "support engineer (non-technical)",
+  // Customer-facing services/field/support ICs. The user's scope is
+  // engineering-track SWE/infra — a "Technical Support Engineer", "Solutions
+  // Engineer" (presales), "Field Engineer", or "Escalations Engineer" carries
+  // "engineer" but is a support/services role, exactly like a Sales Engineer.
+  "support engineer",
+  "technical support",
+  "technical services",
+  "technical escalation",
+  "escalation engineer",
+  "escalations engineer",
+  "services engineer",
+  "service engineer",
+  "solutions engineer",
+  "solution engineer",
+  "field engineer",
+  "customer engineer",
+  "network support",
   "client success",
   "community",
   "social media",

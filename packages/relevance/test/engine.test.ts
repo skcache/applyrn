@@ -135,10 +135,30 @@ describe("role-family gate (software + data + ML only)", () => {
     }
   });
 
-  it("suppresses a full-time engineering title that is not early-career", () => {
-    const r = evaluateRelevance({ title: "IT Support Engineer", location: "New York, NY" });
+  it("allows full-time roles within the 0-2 YoE ceiling (no intern marker needed)", () => {
+    // The user widened scope: full-time is fine as long as experience is 0-2 YoE.
+    for (const title of [
+      "Software Engineer",
+      "Backend Engineer",
+      "Machine Learning Engineer",
+      "Data Engineer",
+    ]) {
+      const r = evaluateRelevance({
+        title,
+        location: "San Francisco, CA",
+        descriptionPlain: "0-2 years of experience required",
+      });
+      expect(r.suppressed, `${title} (0-2 YoE) should be in scope`).toBe(false);
+      expect(r.score).toBeGreaterThan(0);
+    }
+  });
+
+  it("suppresses a full-time title with no early-career signal at all", () => {
+    // A plain mid-level engineering title with no junior marker and no stated
+    // experience requirement fails the 0-2 YoE scope gate.
+    const r = evaluateRelevance({ title: "Platform Engineer", location: "New York, NY" });
     expect(r.suppressed).toBe(true);
-    expect(r.suppressionReason).toMatch(/Not early-career/i);
+    expect(r.suppressionReason).toMatch(/0-2 YoE scope|Not/i);
   });
 
   it("suppresses learners/sales/marketing/design/PM/recruiting/ops roles", () => {
@@ -175,6 +195,34 @@ describe("experience/PhD hard bodies", () => {
       descriptionPlain: "Requires 5+ years of professional experience",
     });
     expect(r.suppressed).toBe(true);
+    expect(r.suppressionReason).toMatch(/years of experience/);
+  });
+
+  it("suppresses an explicit 3+ years ceiling (over 0-2 YoE scope)", () => {
+    const r = evaluateRelevance({
+      title: "Machine Learning Engineer",
+      location: "San Francisco, CA",
+      descriptionPlain: "3+ years of relevant experience in production ML systems",
+    });
+    expect(r.suppressed).toBe(true);
+  });
+
+  it("allows an explicit 2-year ceiling (at the 0-2 YoE boundary)", () => {
+    const r = evaluateRelevance({
+      title: "DevOps Engineer",
+      location: "Remote, US",
+      descriptionPlain: "2 years of professional experience or equivalent",
+    });
+    expect(r.suppressed).toBe(false);
+  });
+
+  it("does not treat company-age prose as an experience requirement", () => {
+    const r = evaluateRelevance({
+      title: "Software Engineer",
+      location: "Remote, US",
+      descriptionPlain: "0-2 years of experience. We are a 10-year-old startup built by engineers.",
+    });
+    expect(r.suppressed).toBe(false);
   });
 
   it("suppresses PhD-required roles", () => {

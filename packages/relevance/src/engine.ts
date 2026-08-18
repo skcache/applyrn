@@ -23,6 +23,7 @@ import {
   DESCRIPTION_STRONG_SKILLS,
   EARLY_CAREER_MARKERS,
   ENGINEERING_TRACK_MARKERS,
+  MAX_EXPERIENCE_YEARS,
   NON_ENGINEERING_ROLE_MARKERS,
   NON_US_REGIONS,
   SENIORITY_MARKERS,
@@ -57,14 +58,8 @@ export type RelevanceInput = {
   descriptionPlain?: string;
 };
 
-/** Experience minimum / hard-level body signals (title + description). */
-const BODY_HARD_PATTERNS: { pattern: RegExp; reason: string }[] = [
-  {
-    pattern: /(\d{1,2})\s*\+?\s*(years?|yrs?)\s+(of\s+)?(professional\s+)?experience/i,
-    reason: "Years-of-experience minimum",
-  },
-  { pattern: /\bph\.?d\s*(degree|required|preferred)?\b/i, reason: "PhD requirement" },
-];
+/** PhD requirement is a hard body-signal regardless of level. */
+const PHD_PATTERN = /\bph\.?d\s*(degree|required|preferred)?\b/i;
 
 /** Escape a literal for use inside a RegExp. */
 function esc(s: string): string {
@@ -187,6 +182,42 @@ function earlyCareerMarker(title: string): string | null {
 /** Seniority gate: suppress lead/senior/staff/manager/director titles. */
 function seniorityMarker(title: string): string | null {
   return hasAny(title, SENIORITY_MARKERS);
+}
+
+/** Early-career signals: marker presence AND any stated years requirement,
+ * computed independently — a contradicting requirement (e.g. an "internship"
+ * that demands 5+ years) must still suppress. */
+function earlyCareerSignal(input: RelevanceInput): { marker?: string; maxYears?: number } {
+  const titleMarker = earlyCareerMarker(input.title);
+  const descMarker = input.descriptionPlain ? earlyCareerMarker(input.descriptionPlain) : null;
+  return {
+    marker: titleMarker ?? descMarker ?? undefined,
+    maxYears: statedMaxYears(input) ?? undefined,
+  };
+}
+
+/**
+ * Highest years-of-experience requirement explicitly stated in the title or
+ * description, or null when none is stated. Handles "3+ years", "5 years",
+ * "2-4 years", "0-2 years X experience". Only a REQUIREMENT counts: prose
+ * like "we are a 10-year-old company" must not suppress a junior role.
+ */
+function statedMaxYears(input: RelevanceInput): number | null {
+  const text = `${input.title} ${input.descriptionPlain ?? ""}`;
+  const requirements: number[] = [];
+  const patterns = [
+    /(\d{1,2})\s*\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:professional|relevant|industry|work)?\s*experience/gi,
+    /(\d{1,2})\s*-\s*(\d{1,2})\s*(?:years?|yrs?)\s+(?:of\s+)?experience/gi,
+    /(?:minimum|require|requires|required)\s*(?:of\s*)?(\d{1,2})\s*(?:\+|to)?\s*(?:years?|yrs?)/gi,
+    /at\s+least\s+(\d{1,2})\s*(?:years?|yrs?)/gi,
+  ];
+  for (const re of patterns) {
+    for (const m of text.matchAll(re)) {
+      if (m[1]) requirements.push(Number(m[1]));
+      if (m[2]) requirements.push(Number(m[2]));
+    }
+  }
+  return requirements.length ? Math.max(...requirements) : null;
 }
 
 /**
@@ -319,32 +350,44 @@ export function evaluateRelevance(
     };
   }
 
-  // 4. Early-career scope (title marker required; description marker is a
-  //    weak secondary that still alerts, matching "ranks don't hide broadly
-  //    relevant early-career roles").
-  const titleLevel = earlyCareerMarker(input.title);
-  const descLevel = input.descriptionPlain
-    ? hasAny(input.descriptionPlain, EARLY_CAREER_MARKERS)
-    : null;
-  if (!titleLevel && !descLevel) {
+  // 4. Experience/scope gate. The user's scope is BOTH internships AND
+  //    full-time, capped at 0-2 YoE. A role is in-scope when it has an
+  //    early-career marker (intern/co-op/new-grad/entry-level/junior/level-I), OR
+  //    its stated years-of-experience requirement is at most 2. This admits
+  //    full-time roles the moment their posting shows 0-1/0-2 YoE ("0-2 years
+  //    experience", "new grad", "Software Engineer I") while NOT re-flooding
+  //    with bare mid-level "Software Engineer" titles that carry no junior
+  //    signal — the exact noise the user asked to kill. A stated requirement
+  //    OVER the cap suppresses regardless of any marker (an "internship that
+  //    demands 5+ years" is contradictory and out).
+  const early = earlyCareerSignal(input);
+
+  if (early.maxYears !== undefined && early.maxYears > MAX_EXPERIENCE_YEARS) {
     return {
       score: 0,
       reasons: [],
       suppressed: true,
-      suppressionReason: "Not early-career scope (missing intern/co-op/new-grad signal)",
+      suppressionReason: `Requires ${early.maxYears}+ years of experience (over 0-${MAX_EXPERIENCE_YEARS} YoE scope)`,
+    };
+  }
+  if (early.marker === undefined && early.maxYears === undefined) {
+    return {
+      score: 0,
+      reasons: [],
+      suppressed: true,
+      suppressionReason:
+        "Not 0-2 YoE scope (no intern/new-grad marker and no stated experience requirement)",
     };
   }
 
-  // 5. Years-of-experience and PhD bodies.
-  for (const rule of BODY_HARD_PATTERNS) {
-    if (rule.pattern.test(input.title) || rule.pattern.test(input.descriptionPlain ?? "")) {
-      return {
-        score: 0,
-        reasons: [],
-        suppressed: true,
-        suppressionReason: rule.reason,
-      };
-    }
+  // 5. PhD is a hard body-signal regardless of level/marker.
+  if (PHD_PATTERN.test(input.title) || PHD_PATTERN.test(input.descriptionPlain ?? "")) {
+    return {
+      score: 0,
+      reasons: [],
+      suppressed: true,
+      suppressionReason: "PhD requirement",
+    };
   }
 
   const { score, reasons } = scoreRole(input);
