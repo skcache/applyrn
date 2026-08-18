@@ -314,30 +314,48 @@ export const SENIORITY_MARKERS = [
 
 /** Software / data / ML engineering-track role families (positive gate). */
 export const ENGINEERING_TRACK_MARKERS = [
+  // core SWE
   "software",
   "swe",
   "developer",
   "programmer",
   "engineer",
   "engineering",
+  // web / application layers
   "backend",
   "back end",
   "frontend",
   "front end",
   "full-stack",
   "fullstack",
+  // data + ML + applied AI
   "data",
   "ml",
   "machine learning",
   "ai",
   "artificial intelligence",
   "nlp",
+  // infra / platform / ops
   "infrastructure",
+  "infra",
   "platform",
   "systems",
   "sre",
   "devops",
   "cloud",
+  // embedded / low-level
+  "embedded",
+  "firmware",
+  // test / automation / reliability of software itself
+  "test",
+  "testing",
+  "qa",
+  "quality assurance",
+  "automation",
+  // developer tooling
+  "developer tools",
+  "devtools",
+  // specialized engineering
   "research engineer",
   "security engineer",
   "quant",

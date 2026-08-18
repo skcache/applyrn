@@ -90,6 +90,36 @@ describe("early-career scope gate (seniority == out)", () => {
 });
 
 describe("role-family gate (software + data + ML only)", () => {
+  it("covers the user's full declared engineering-track scope", () => {
+    // Every family the user listed as in-scope (all US + early-career):
+    const cases: [string, string, string][] = [
+      // [title, expected reason label, location]
+      ["Software Engineering Intern", "Software engineering", "San Francisco, CA"],
+      ["Backend Engineering Intern", "Backend", "New York, NY"],
+      ["Infrastructure Engineering Intern", "Infrastructure / cloud", "Seattle, WA"],
+      ["Platform Engineering Intern", "Systems / platform", "Austin, TX"],
+      ["DevOps Engineering Intern", "DevOps / SRE", "Remote, US"],
+      ["SRE Intern", "DevOps / SRE", "Remote, US"],
+      ["Embedded Software Intern", "Embedded", "Boston, MA"],
+      ["Firmware Engineering Intern", "Embedded", "San Jose, CA"],
+      ["Machine Learning Intern", "ML / AI", "San Francisco, CA"],
+      ["ML Engineering Intern", "ML / AI", "Remote, US"],
+      ["Data Engineering Intern", "Data", "New York, NY"],
+      ["Data Science Intern", "Data", "Seattle, WA"],
+      ["Test Automation Engineering Intern", "Test / automation", "Remote, US"],
+      ["QA Engineering Intern", "Test / automation", "San Francisco, CA"],
+      ["Test Infrastructure Intern", "Test / automation", "Denver, CO"],
+      ["Developer Tools Intern", "Developer tools", "Remote, US"],
+      ["DevTools Engineering Intern", "Developer tools", "San Francisco, CA"],
+      ["Cloud Engineering Intern", "Infrastructure / cloud", "Remote, US"],
+    ];
+    for (const [title, label, location] of cases) {
+      const r = evaluateRelevance({ title, location });
+      expect(r.suppressed).toBe(false, `${title} should be in scope`);
+      expect(r.reasons).toContain(label);
+    }
+  });
+
   it("allows engineering-track roles", () => {
     for (const title of [
       "Software Engineering Intern",

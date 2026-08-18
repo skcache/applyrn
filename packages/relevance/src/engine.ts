@@ -106,20 +106,50 @@ function earlyCareerLabel(marker: string): string {
   return "Early career";
 }
 
-/** Friendly reason label for an engineering-track marker. */
-function engineeringLabel(marker: string): string {
-  const m = marker.toLowerCase();
-  if (m === "ml" || m.includes("machine learning") || m === "ai" || m === "nlp") {
-    return "ML / AI";
+/** Specificity-ordered track labels; the first marker matched in this order
+ * wins, so "Embedded Software Engineer" is labeled Embedded, not Software. */
+const TRACK_LABEL_PRIORITY: [string, string][] = [
+  ["ml", "ML / AI"],
+  ["machine learning", "ML / AI"],
+  ["ai", "ML / AI"],
+  ["nlp", "ML / AI"],
+  ["data", "Data"],
+  ["embedded", "Embedded"],
+  ["firmware", "Embedded"],
+  ["test", "Test / automation"],
+  ["testing", "Test / automation"],
+  ["qa", "Test / automation"],
+  ["quality assurance", "Test / automation"],
+  ["automation", "Test / automation"],
+  ["developer tools", "Developer tools"],
+  ["devtools", "Developer tools"],
+  ["infra", "Infrastructure / cloud"],
+  ["cloud", "Infrastructure / cloud"],
+  ["infrastructure", "Infrastructure / cloud"],
+  ["sre", "DevOps / SRE"],
+  ["devops", "DevOps / SRE"],
+  ["backend", "Backend"],
+  ["back end", "Backend"],
+  ["frontend", "Frontend"],
+  ["front end", "Frontend"],
+  ["full-stack", "Full-stack"],
+  ["fullstack", "Full-stack"],
+  ["platform", "Systems / platform"],
+  ["systems", "Systems / platform"],
+];
+
+/**
+ * Best-fit engineering-track family for a title: returns the highest-priority
+ * label among all marker matches (falling back to generic software).
+ */
+function engineeringFamilyFor(title: string): string | null {
+  const lower = title.toLowerCase();
+  for (const [marker, label] of TRACK_LABEL_PRIORITY) {
+    if (new RegExp(`(^|[^a-z])${esc(marker.toLowerCase())}([^a-z]|$)`).test(lower)) {
+      return label;
+    }
   }
-  if (m.startsWith("data")) return "Data";
-  if (m.includes("backend") || m.includes("back end")) return "Backend";
-  if (m.includes("frontend") || m.includes("front end")) return "Frontend";
-  if (m.includes("fullstack") || m.includes("full-stack")) return "Full-stack";
-  if (m.includes("infrastructure") || m.includes("platform") || m === "systems") {
-    return "Systems / platform";
-  }
-  return "Software engineering";
+  return hasAny(title, ENGINEERING_TRACK_MARKERS) ? "Software engineering" : null;
 }
 
 /** Is the location US (explicit US text, state, or state code after comma)? */
@@ -197,9 +227,9 @@ function scoreRole(input: RelevanceInput): { score: number; reasons: string[] } 
     }
   }
 
-  const track = hasAny(input.title, ENGINEERING_TRACK_MARKERS);
+  const track = engineeringFamilyFor(input.title);
   if (track) {
-    reasons.push(engineeringLabel(track));
+    reasons.push(track);
     score += 30;
   } else if (input.descriptionPlain) {
     const descTrack = hasAny(input.descriptionPlain, ENGINEERING_TRACK_MARKERS);
