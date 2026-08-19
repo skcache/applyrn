@@ -124,6 +124,12 @@ function providerLabel(provider: string): string {
       return "Ashby";
     case "lever":
       return "Lever";
+    case "smartrecruiters":
+      return "SmartRecruiters";
+    case "workday":
+      return "Workday";
+    case "oracle":
+      return "Taleo";
     default:
       return provider;
   }
