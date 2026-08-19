@@ -50,6 +50,33 @@ export const CONCURRENCY_LIMIT = 4;
  */
 export const MAX_FETCHES_PER_INVOCATION = 40;
 
+/**
+ * Smallest shard count whose worst bucket stays within MAX_FETCHES_PER_INVOCATION.
+ *
+ * ceil(n / MAX) is a lower bound but NOT a guarantee: the company-id hash
+ * is imperfect and can overfill a bucket (measured: 160 ids -> 41 in one
+ * bucket, 240 -> 42), and detail-enrichment + retry fetches share the same
+ * invocation budget. A cycle that exceeds the soft budget eats into the
+ * free-plan 50-subrequest hard cap and can silently kill the watchlist tail
+ * (the D-011 failure mode), so shard count must be computed from the real
+ * distribution, not just the list length.
+ */
+export function shardCountFor(companies: readonly { id: string }[]): number {
+  let k = Math.max(1, Math.ceil(companies.length / MAX_FETCHES_PER_INVOCATION));
+  while (true) {
+    const buckets = new Array<number>(k).fill(0);
+    for (const c of companies) {
+      const b = companyShard(c.id, k);
+      const idx = b % k;
+      buckets[idx] = (buckets[idx] ?? 0) + 1;
+    }
+    let worst = 0;
+    for (const n of buckets) if (n > worst) worst = n;
+    if (worst <= MAX_FETCHES_PER_INVOCATION) return k;
+    k++; // one more shard reduces every bucket; iterate until within budget
+  }
+}
+
 /** Stable bucket for a company: same id always lands in the same shard. */
 export function companyShard(companyId: string, shardCount: number): number {
   let h = 0;
@@ -102,7 +129,11 @@ export class PollScheduler implements Poller {
     // cycle that came before, not the one we just completed.
     const priorStatus = await this.repo.getSystemStatus();
     const companies = await this.repo.listEnabledCompanies();
-    const shardCount = Math.max(1, Math.ceil(companies.length / MAX_FETCHES_PER_INVOCATION));
+    // Data-driven shard count: the smallest k whose worst bucket is within the
+    // per-invocation fetch budget. ceil(n/40) is a lower bound but the id hash
+    // can overfill (160 -> 41 in one bucket), which eats into the free-plan
+    // 50-subrequest hard cap. shardCountFor guarantees the invariant.
+    const shardCount = shardCountFor(companies);
 
     // Shard the watchlist across invocations (free-plan subrequest cap).
     // Companies are bucketed stably by id; the shard that runs rotates

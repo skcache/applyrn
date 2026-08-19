@@ -318,6 +318,7 @@ export class D1Repository {
     companyCount: number;
     cadenceSeconds: number;
     lastPollAt?: string;
+    shardCount: number;
   }> {
     const count = await this.db
       .prepare("SELECT COUNT(*) AS n FROM companies WHERE enabled = 1")
@@ -330,6 +331,11 @@ export class D1Repository {
       companyCount: Number(count?.n ?? 0),
       cadenceSeconds: Number(cadence?.c ?? DEFAULT_POLL_INTERVAL_SECONDS),
       lastPollAt: last?.t ? String(last.t) : undefined,
+      // Free-plan subrequest cap: shard count = ceil(companies / fetch budget),
+      // so external fallback triggers know how many shards to cover.
+      // Mirrors MAX_FETCHES_PER_INVOCATION in scheduler.ts (repo can't import
+      // it without a scheduler -> repo cycle).
+      shardCount: Math.max(1, Math.ceil(Number(count?.n ?? 0) / 40)),
     };
   }
 

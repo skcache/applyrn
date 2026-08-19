@@ -7,6 +7,7 @@ import {
   PollScheduler,
   companyShard,
   minuteShard,
+  shardCountFor,
 } from "../src/scheduler.js";
 import type { CompanyConfig } from "@applyrn/domain";
 
@@ -385,6 +386,35 @@ describe("watchlist sharding (free-plan subrequest cap)", () => {
     expect(new Set([...first, ...second]).size).toBe(63);
     // Shards are disjoint.
     for (const id of first) expect(second).not.toContain(id);
+  });
+
+  it("scales to the Phase-1 target (160+ companies, no bucket over the fetch cap)", async () => {
+    // Phase 1 grows the watchlist to 150-200 companies (V1 scope). The hard
+    // invariant: NO shard may exceed MAX_FETCHES_PER_INVOCATION, otherwise
+    // detail-enrichment fetches push the invocation over the free-plan
+    // 50-subrequest cap and silently kill the watchlist tail (D-011).
+    // ceil(n/40) is a lower bound but the id hash can overfill a bucket
+    // (160 ids -> 41, 240 -> 42), so shardCountFor bumps the count until the
+    // WORST bucket is within budget.
+    for (const n of [63, 120, 150, 160, 180, 200, 240, 250]) {
+      const ids = Array.from({ length: n }, (_, i) => `scale-${String(i).padStart(3, "0")}`);
+      const k = shardCountFor(ids.map((id) => ({ id })));
+      const buckets = new Map<number, string[]>();
+      for (const id of ids) {
+        const b = companyShard(id, k);
+        buckets.set(b, [...(buckets.get(b) ?? []), id]);
+      }
+      // Guarantee: every bucket within the fetch budget.
+      for (const list of buckets.values()) {
+        expect(
+          list.length,
+          `n=${n} shard ${buckets.size} buckets worst=${Math.max(...[...buckets.values()].map((l) => l.length))}`,
+        ).toBeLessThanOrEqual(MAX_FETCHES_PER_INVOCATION);
+      }
+      // No company lost, none duplicated across shards.
+      const flat = [...buckets.values()].flat();
+      expect(new Set(flat).size).toBe(n);
+    }
   });
 
   it("handles small watchlists without sharding (shardCount = 1)", async () => {

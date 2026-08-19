@@ -12,8 +12,11 @@ name: Poll (redundant trigger)
 # so the two triggers never overlap and double-fire the same companies.
 #
 # Coverage math: the worker shards the watchlist (free-plan subrequest
-# cap), so each call covers one shard. Two jobs with explicit ?shard=0/1
-# ensure every company is polled within ~5 minutes of a detected gap.
+# cap), so each /api/poll call covers one shard. The number of shards grows
+# with the watchlist (guaranteed by the worker's shardCountFor: worst bucket
+# <= 40 companies), so this workflow reads shardCount from /api/status and
+# polls every shard — a fixed 0/1 pair would silently skip shards 2+ once
+# the watchlist crosses ~80 companies.
 
 on:
   schedule:
@@ -28,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       stale: ${{ steps.check.outputs.stale }}
+      shards: ${{ steps.check.outputs.shards }}
     steps:
       - name: Check whether the primary cron is still cycling
         id: check
@@ -36,12 +40,17 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
             "https://applyrn-worker.siddhankuwar116.workers.dev/api/status")
           LAST=$(echo "$STATUS" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const s=JSON.parse(d).status; console.log(s.lastPollAt ?? "")})')
+          SHARDS=$(echo "$STATUS" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{console.log(JSON.parse(d).status.shardCount ?? "1")})')
           NOW=$(date -u +%s)
+          # Emit a JSON array of shard indices so the matrix job can poll every
+          # shard without knowing the count in advance (watchlist-size dependent).
+          SHARD_LIST=$(node -e 'const n=Number(process.argv[1]||"1");console.log(JSON.stringify(Array.from({length:n},(_,i)=>String(i))))' "$SHARDS")
+          echo "shards=$SHARD_LIST" >> "$GITHUB_OUTPUT"
           if [ -z "$LAST" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
           else
             AGE=$((NOW - $(date -u -d "$LAST" +%s)))
-            echo "last poll age: ${AGE}s"
+            echo "last poll age: ${AGE}s; shards: ${SHARD_LIST}"
             if [ "$AGE" -gt 180 ]; then
               echo "stale=true" >> "$GITHUB_OUTPUT"
             else
@@ -49,26 +58,18 @@ jobs:
             fi
           fi
 
-  poll-shard-0:
+  poll-shards:
     needs: check-staleness
     if: needs.check-staleness.outputs.stale == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: ${{ fromJSON(needs.check-staleness.outputs.shards) }}
     steps:
-      - name: Poll shard 0
+      - name: Poll shard ${{ matrix.shard }}
         run: |
           curl -fsS -X POST \
             -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
-            "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll?shard=0"
+            "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll?shard=${{ matrix.shard }}"
         timeout-minutes: 2
 
-  poll-shard-1:
-    needs: check-staleness
-    if: needs.check-staleness.outputs.stale == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Poll shard 1
-        run: |
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
-            "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll?shard=1"
-        timeout-minutes: 2
