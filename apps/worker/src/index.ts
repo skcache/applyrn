@@ -1,4 +1,11 @@
-import { AshbyAdapter, GreenhouseAdapter, LeverAdapter } from "@applyrn/adapters";
+import {
+  AshbyAdapter,
+  GreenhouseAdapter,
+  LeverAdapter,
+  SmartRecruitersAdapter,
+  TaleoAdapter,
+  WorkdayAdapter,
+} from "@applyrn/adapters";
 import type { JobSourceAdapter } from "@applyrn/adapters";
 import type { ApplicationStatus } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
@@ -191,6 +198,9 @@ function buildPollService(env: WorkerEnv): PollService {
   adapters.set("greenhouse", new GreenhouseAdapter());
   adapters.set("ashby", new AshbyAdapter());
   adapters.set("lever", new LeverAdapter());
+  adapters.set("smartrecruiters", new SmartRecruitersAdapter());
+  adapters.set("workday", new WorkdayAdapter());
+  adapters.set("oracle", new TaleoAdapter());
   return new PollService(new D1Repository(env.DB), adapters, env);
 }
 

@@ -1,0 +1,47 @@
+{
+  "id": "744000144362911",
+  "name": "Software Engineering Intern",
+  "uuid": "4e3696ea-6cb8-4cf2-8a81-769acbcceb8f",
+  "jobAdId": "718d6822-f3de-421e-aa95-836d67e6ec08",
+  "defaultJobAd": true,
+  "refNumber": "JR0083179",
+  "company": { "identifier": "DeliveryHero", "name": "Delivery Hero" },
+  "location": {
+    "city": "Denver",
+    "country": "us",
+    "remote": true,
+    "hybrid": false,
+    "fullLocation": "Denver, CO, United States"
+  },
+  "releasedDate": "2026-08-14T16:23:39.776Z",
+  "postingUrl": "https://jobs.smartrecruiters.com/DeliveryHero/744000144362911-software-engineering-intern-",
+  "applyUrl": "https://jobs.smartrecruiters.com/DeliveryHero/744000144362911-software-engineering-intern-?oga=true",
+  "jobAd": {
+    "sections": {
+      "companyDescription": {
+        "title": "Company Description",
+        "text": "<p>We are the leading local delivery platform.</p>"
+      },
+      "jobDescription": {
+        "title": "Job Description",
+        "text": "<p><strong>YOUR MISSION:</strong> Ship features for our platform team.</p>"
+      },
+      "qualifications": {
+        "title": "Qualifications",
+        "text": "<p>0-2 years of experience in software engineering. Python or TypeScript.</p>"
+      },
+      "additionalInformation": {
+        "title": "Additional Information",
+        "text": "<p>Open to relocation.</p>"
+      }
+    }
+  },
+  "active": true,
+  "visibility": "PUBLIC",
+  "industry": { "id": "internet", "label": "Internet" },
+  "department": { "id": "engineering", "label": "Engineering" },
+  "function": { "id": "engineering", "label": "Engineering" },
+  "experienceLevel": { "id": "entry", "label": "Entry Level" },
+  "typeOfEmployment": { "id": "internship", "label": "Internship" },
+  "language": "en"
+}

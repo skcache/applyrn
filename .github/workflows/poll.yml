@@ -72,4 +72,3 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
             "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll?shard=${{ matrix.shard }}"
         timeout-minutes: 2
-

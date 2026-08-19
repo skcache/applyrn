@@ -1,0 +1,57 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 2,
+  "content": [
+    {
+      "id": "744000144362911",
+      "name": "Software Engineering Intern",
+      "uuid": "4e3696ea-6cb8-4cf2-8a81-769acbcceb8f",
+      "jobAdId": "718d6822-f3de-421e-aa95-836d67e6ec08",
+      "defaultJobAd": true,
+      "refNumber": "JR0083179",
+      "company": { "identifier": "DeliveryHero", "name": "Delivery Hero" },
+      "releasedDate": "2026-08-14T16:23:39.776Z",
+      "location": {
+        "city": "Denver",
+        "country": "us",
+        "remote": true,
+        "hybrid": false,
+        "fullLocation": "Denver, CO, United States"
+      },
+      "industry": { "id": "internet", "label": "Internet" },
+      "department": { "id": "engineering", "label": "Engineering" },
+      "function": { "id": "engineering", "label": "Engineering" },
+      "typeOfEmployment": { "id": "internship", "label": "Internship" },
+      "experienceLevel": { "id": "entry", "label": "Entry Level" },
+      "customField": {},
+      "visibility": "PUBLIC",
+      "ref": "posting",
+      "language": "en"
+    },
+    {
+      "id": "744000144325944",
+      "name": "DevOps Engineer",
+      "uuid": "4e3696ea-6cb8-4cf2-8a81-769acbcceb91",
+      "jobAdId": "718d6822-f3de-421e-aa95-836d67e6ec09",
+      "defaultJobAd": true,
+      "refNumber": "JR0083180",
+      "company": { "identifier": "DeliveryHero", "name": "Delivery Hero" },
+      "releasedDate": "2026-08-13T09:00:00.000Z",
+      "location": {
+        "city": "Remote",
+        "country": "us",
+        "remote": true,
+        "hybrid": false,
+        "fullLocation": "United States (Remote)"
+      },
+      "department": { "id": "engineering", "label": "Engineering" },
+      "function": { "id": "engineering", "label": "Engineering" },
+      "typeOfEmployment": { "id": "permanent", "label": "Full-time" },
+      "experienceLevel": { "id": "entry", "label": "Entry Level" },
+      "customField": {},
+      "visibility": "PUBLIC",
+      "language": "en"
+    }
+  ]
+}

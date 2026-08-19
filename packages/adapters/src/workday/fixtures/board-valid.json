@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Software Engineering Intern",
+      "externalPath": "/job/Seattle-WA/Software-Engineering-Intern_JR107566",
+      "locationsText": "Seattle, WA; Remote",
+      "postedOn": "Posted Today",
+      "bulletFields": ["JR107566"]
+    },
+    {
+      "title": "Backend Engineering Co-op",
+      "externalPath": "/job/Remote/Backend-Engineering-Co-op_JR107575",
+      "locationsText": "Remote",
+      "postedOn": "Posted 2 days ago",
+      "bulletFields": ["JR107575"]
+    }
+  ]
+}

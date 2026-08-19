@@ -1,0 +1,25 @@
+{
+  "requisitionList": [
+    {
+      "jobId": "JR107566",
+      "contestNo": "JR107566",
+      "positions": 1,
+      "column": ["Software Engineering Intern", "[\"Titusville, FL\"]", "Full-time"],
+      "locationsColumns": [1],
+      "linkedColumn": 0
+    },
+    {
+      "jobId": "JR107575",
+      "contestNo": "JR107575",
+      "positions": 2,
+      "column": ["Backend Engineering Co-op", "[\"Remote\", \"United States\"]", "Full-time"],
+      "locationsColumns": [1],
+      "linkedColumn": 0
+    }
+  ],
+  "pagingData": {
+    "totalCount": 2,
+    "pageSize": 100,
+    "pageNo": 1
+  }
+}

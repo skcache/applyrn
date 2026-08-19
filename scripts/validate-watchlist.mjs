@@ -21,9 +21,53 @@ const PROVIDERS = {
   greenhouse: (key) => `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(key)}/jobs`,
   ashby: (key) => `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(key)}`,
   lever: (key) => `https://api.lever.co/v0/postings/${encodeURIComponent(key)}?mode=json`,
+  smartrecruiters: (key) =>
+    `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(key)}/postings?limit=2`,
+  // Workday: POST {origin}/wday/cxs/{tenant}/{siteId}/jobs (validator uses fetch
+  // with method POST to exercise the same path the adapter uses).
+  workday: (key) => {
+    const [host, site = host] = String(key)
+      .split(":")
+      .map((s) => s.trim().replace(/^https?:\/\//, ""));
+    return {
+      url: `https://${host}/wday/cxs/${encodeURIComponent(host)}/${encodeURIComponent(site)}/jobs`,
+      method: "POST",
+    };
+  },
+  oracle: (key) => {
+    const [host, , portal = "", lang = "en"] = String(key)
+      .split(":")
+      .map((s) => s.trim());
+    return {
+      url: `https://${host.replace(/^https?:\/\//, "")}/careersection/rest/jobboard/searchjobs?lang=${encodeURIComponent(lang)}&portal=${encodeURIComponent(portal)}`,
+      method: "POST",
+    };
+  },
 };
 
 const TIMEOUT_MS = 15_000;
+
+/** Body shape for provider endpoints that need a POST (Workday/Taleo). */
+function bodyFor(provider) {
+  if (provider === "workday")
+    return JSON.stringify({ appliedFacets: {}, searchText: "", limit: 2, offset: 0 });
+  if (provider === "oracle") return JSON.stringify({ pageNo: 1 });
+  return undefined;
+}
+
+/** Content type for the provider POSTs. */
+function headersFor(provider) {
+  if (provider === "workday") {
+    return {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Accept-Language": "en-US",
+    };
+  }
+  if (provider === "oracle")
+    return { Accept: "application/json", "Content-Type": "application/json" };
+  return { Accept: "application/json" };
+}
 
 function pickWatchlist(argv) {
   const explicit = argv[2];
@@ -38,11 +82,20 @@ async function check(company) {
   if (!build) {
     return { ok: false, error: `unknown provider "${company.provider}"` };
   }
-  const url = build(company.boardKey ?? company.id);
+  const target = build(company.boardKey ?? company.id);
+  const url = typeof target === "string" ? target : target.url;
+  const method = typeof target === "string" ? "GET" : target.method;
+  const body = bodyFor(company.provider, company.boardKey);
+  const headers = headersFor(company.provider);
   const started = Date.now();
   let res;
   try {
-    res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
   } catch (err) {
     const code = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "network";
     return { ok: false, error: `${code}: could not reach board`, ms: Date.now() - started };
@@ -52,8 +105,13 @@ async function check(company) {
     return { ok: false, error: `HTTP ${res.status}`, ms: latencyMs };
   }
   try {
-    const body = await res.json();
-    const jobs = Array.isArray(body) ? body : body?.jobs;
+    const text = await res.text();
+    const bodyJson =
+      text.trim().startsWith("{") || text.trim().startsWith("[") ? JSON.parse(text) : null;
+    const list = Array.isArray(bodyJson)
+      ? bodyJson
+      : (bodyJson?.jobPostings ?? bodyJson?.requisitionList ?? bodyJson?.content);
+    const jobs = Array.isArray(list) ? list : bodyJson?.jobs;
     if (!Array.isArray(jobs)) {
       return { ok: false, error: "payload is not a job list", ms: latencyMs };
     }
