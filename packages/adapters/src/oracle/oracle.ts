@@ -141,12 +141,18 @@ export class TaleoAdapter implements JobSourceAdapter {
 
   async fetchBoard(company: CompanyConfig, ctx?: FetchContext): Promise<RawBoardResponse> {
     const { origin, portal, lang } = parseTaleoBoardKey(company.boardKey);
-    const url = `${origin}/careersection/rest/jobboard/searchjobs?lang=${encodeURIComponent(lang)}&portal=${encodeURIComponent(portal)}`;
+    // REQ_SOURCE=WEB + tz/tzname headers were confirmed necessary by the live
+    // tenant probe (2026-08-19, Volkswagen America): without them Taleo
+    // answers 500 "An Error Occurred in TEE".
+    const url = `${origin}/careersection/rest/jobboard/searchjobs?lang=${encodeURIComponent(lang)}&portal=${encodeURIComponent(portal)}&REQ_SOURCE=WEB`;
     const res = await this.request(url, ctx, {
       method: "POST",
       headers: {
-        Accept: "application/json",
+        Accept: "application/json, text/javascript, */*; q=0.01",
         "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        tz: "GMT-05:00",
+        tzname: "America/New_York",
       },
       body: JSON.stringify({
         pageNo: 1,

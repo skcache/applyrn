@@ -48,16 +48,34 @@ type WorkdayJobsResponse = {
   jobPostings?: WorkdayJobPosting[];
 };
 
-/** Watchlist boardKey encodes "tenant:siteId"; split into both URL segments. */
+/**
+ * Watchlist boardKey encodes "host:tenant:siteId" — e.g. for Adobe:
+ * "adobe.wd5.myworkdayjobs.com:adobe:external_experienced". The live CXS URL
+ * is /wday/cxs/{tenant}/{siteId}/jobs where tenant is the SHORT tenant name
+ * (the host subdomain), so a bare host is not enough. Backward-compatible
+ * fallbacks: "host" derives tenant from the first host label and siteId =
+ * tenant; "host:siteId" keeps the derived tenant.
+ */
 export function parseWorkdayBoardKey(boardKey: string): {
   origin: string;
   tenant: string;
   siteId: string;
 } {
-  const parts = boardKey.split(":").map((s) => s.trim().replace(/^https?:\/\//, ""));
-  const tenant = parts[0] ?? boardKey.trim().replace(/^https?:\/\//, "");
-  const siteId = parts[1] || tenant;
-  return { origin: `https://${tenant}`, tenant, siteId };
+  const clean = (s: string) => s.trim().replace(/^https?:\/\//, "");
+  const parts = boardKey.split(":").map(clean);
+  const host = parts[0] ?? boardKey.trim();
+  const shortTenant = (host.split(".")[0] ?? host).toLowerCase();
+  // Count-aware: 1 part = host only; 2 parts = host:siteId (tenant derived);
+  // 3 parts = host:tenant:siteId (explicit tenant).
+  let tenant = shortTenant;
+  let siteId = shortTenant;
+  if (parts.length >= 3) {
+    tenant = parts[1] || shortTenant;
+    siteId = parts[2] || tenant;
+  } else if (parts.length === 2) {
+    siteId = parts[1] || shortTenant;
+  }
+  return { origin: `https://${host}`, tenant, siteId };
 }
 
 /** Human relative text like "Posted Today"/"30+ days ago" → no timestamp. */

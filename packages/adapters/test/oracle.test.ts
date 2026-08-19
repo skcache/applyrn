@@ -91,13 +91,16 @@ describe("TaleoAdapter normalize", () => {
 });
 
 describe("TaleoAdapter fetchBoard", () => {
-  it("POSTs the searchjobs endpoint with lang + portal + page JSON", async () => {
+  it("POSTs the searchjobs endpoint with lang + portal + REQ_SOURCE + JSON body", async () => {
     const fetchImpl = vi.fn(
       async (url: string, init: RequestInit | undefined): Promise<Response> => {
         expect(url).toBe(
-          "https://vwgoa.taleo.net/careersection/rest/jobboard/searchjobs?lang=en&portal=10240752087",
+          "https://vwgoa.taleo.net/careersection/rest/jobboard/searchjobs?lang=en&portal=10240752087&REQ_SOURCE=WEB",
         );
         expect(init?.method).toBe("POST");
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        expect(headers["X-Requested-With"]).toBe("XMLHttpRequest");
+        expect(headers.tz).toBeTruthy();
         const body = JSON.parse(String(init?.body));
         expect(body).toEqual({ pageNo: 1, activeFilterId: undefined });
         return jsonResponse({ requisitionList: [], pagingData: { totalCount: 0 } });

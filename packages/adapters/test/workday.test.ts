@@ -89,12 +89,10 @@ describe("WorkdayAdapter normalize", () => {
 });
 
 describe("WorkdayAdapter fetchBoard", () => {
-  it("POSTs the CXS jobs endpoint with tenant + site id + JSON body", async () => {
+  it("POSTs the CXS jobs endpoint with short tenant + site id + JSON body", async () => {
     const fetchImpl = vi.fn(
       async (url: string, init: RequestInit | undefined): Promise<Response> => {
-        expect(url).toBe(
-          "https://abcfws.wd1.myworkdayjobs.com/wday/cxs/abcfws.wd1.myworkdayjobs.com/abcfws/jobs",
-        );
+        expect(url).toBe("https://abcfws.wd1.myworkdayjobs.com/wday/cxs/abcfws/abcfws/jobs");
         expect(init?.method).toBe("POST");
         const body = JSON.parse(String(init?.body));
         expect(body).toMatchObject({ searchText: "", limit: 100, offset: 0 });
@@ -129,16 +127,24 @@ describe("WorkdayAdapter fetchBoard", () => {
 });
 
 describe("parseWorkdayBoardKey", () => {
-  it("splits host:site into origin/tenant/siteId", () => {
-    expect(parseWorkdayBoardKey("abcfws.wd1.myworkdayjobs.com:abcfws")).toEqual({
-      origin: "https://abcfws.wd1.myworkdayjobs.com",
-      tenant: "abcfws.wd1.myworkdayjobs.com",
-      siteId: "abcfws",
+  it("splits host:tenant:siteId", () => {
+    expect(parseWorkdayBoardKey("adobe.wd5.myworkdayjobs.com:adobe:external_experienced")).toEqual({
+      origin: "https://adobe.wd5.myworkdayjobs.com",
+      tenant: "adobe",
+      siteId: "external_experienced",
     });
   });
 
-  it("defaults siteId to the tenant when omitted", () => {
+  it("derives the short tenant from the host when omitted and defaults siteId to it", () => {
     const k = parseWorkdayBoardKey("acme.wd2.myworkdayjobs.com");
-    expect(k.siteId).toBe("acme.wd2.myworkdayjobs.com");
+    expect(k.origin).toBe("https://acme.wd2.myworkdayjobs.com");
+    expect(k.tenant).toBe("acme");
+    expect(k.siteId).toBe("acme");
+  });
+
+  it("accepts host:siteId (tenant derived from host)", () => {
+    const k = parseWorkdayBoardKey("nvidia.wd5.myworkdayjobs.com:NVIDIAExternalCareerSite");
+    expect(k.tenant).toBe("nvidia");
+    expect(k.siteId).toBe("NVIDIAExternalCareerSite");
   });
 });

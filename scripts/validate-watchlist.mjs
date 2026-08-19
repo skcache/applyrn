@@ -23,14 +23,25 @@ const PROVIDERS = {
   lever: (key) => `https://api.lever.co/v0/postings/${encodeURIComponent(key)}?mode=json`,
   smartrecruiters: (key) =>
     `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(key)}/postings?limit=2`,
-  // Workday: POST {origin}/wday/cxs/{tenant}/{siteId}/jobs (validator uses fetch
-  // with method POST to exercise the same path the adapter uses).
+  // Workday: POST {origin}/wday/cxs/{tenant}/{siteId}/jobs. boardKey format
+  // "host:tenant:siteId" (3 parts) or "host:siteId" (2 parts) — the tenant is
+  // the SHORT tenant from the host subdomain when not explicit.
   workday: (key) => {
-    const [host, site = host] = String(key)
+    const parts = String(key)
       .split(":")
       .map((s) => s.trim().replace(/^https?:\/\//, ""));
+    const host = parts[0] ?? "";
+    const shortTenant = (host.split(".")[0] ?? host).toLowerCase();
+    let tenant = shortTenant;
+    let site = shortTenant;
+    if (parts.length >= 3) {
+      tenant = parts[1] || shortTenant;
+      site = parts[2] || tenant;
+    } else if (parts.length === 2) {
+      site = parts[1] || shortTenant;
+    }
     return {
-      url: `https://${host}/wday/cxs/${encodeURIComponent(host)}/${encodeURIComponent(site)}/jobs`,
+      url: `https://${host}/wday/cxs/${encodeURIComponent(tenant)}/${encodeURIComponent(site)}/jobs`,
       method: "POST",
     };
   },
@@ -39,7 +50,7 @@ const PROVIDERS = {
       .split(":")
       .map((s) => s.trim());
     return {
-      url: `https://${host.replace(/^https?:\/\//, "")}/careersection/rest/jobboard/searchjobs?lang=${encodeURIComponent(lang)}&portal=${encodeURIComponent(portal)}`,
+      url: `https://${host.replace(/^https?:\/\//, "")}/careersection/rest/jobboard/searchjobs?lang=${encodeURIComponent(lang)}&portal=${encodeURIComponent(portal)}&REQ_SOURCE=WEB`,
       method: "POST",
     };
   },
@@ -65,7 +76,13 @@ function headersFor(provider) {
     };
   }
   if (provider === "oracle")
-    return { Accept: "application/json", "Content-Type": "application/json" };
+    return {
+      Accept: "application/json, text/javascript, */*; q=0.01",
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      tz: "GMT-05:00",
+      tzname: "America/New_York",
+    };
   return { Accept: "application/json" };
 }
 
