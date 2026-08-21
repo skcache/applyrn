@@ -75,6 +75,18 @@ function installFetchStub(routes: FetchRoute[]) {
 const jsonReply = (body: Json, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
+/** Workday CXS board stub (POST /wday/cxs/{tenant}/{site}/jobs). */
+function stubWorkday(payload: Json, host = "acme.wd1.myworkdayjobs.com") {
+  installFetchStub([
+    {
+      match: (url) =>
+        url === `https://${host}/wday/cxs/acme/acme/jobs` ||
+        url.startsWith(`https://${host}/wday/cxs/`),
+      handle: () => Promise.resolve(jsonReply(payload)),
+    },
+  ]);
+}
+
 /** Board list stub; can be re-installed per test with a custom payload. */
 function stubBoard(payload: Json, status = 200, boardKey = "exampleai") {
   const board = `https://boards-api.greenhouse.io/v1/boards/${boardKey}/jobs`;
@@ -369,7 +381,7 @@ describe("Telegram failure recovery", () => {
 
     const extra = {
       id: 70005,
-      title: "Platform Intern",
+      title: "Platform Software Intern",
       location: { name: "NYC" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70005",
       updated_at: "2026-08-14T18:30:00Z",
@@ -537,6 +549,79 @@ describe("inactive/reopen lifecycle", () => {
     expect(reopened[0]!.status).toBe("reopened");
   });
 
+  it("never marks jobs missing for partial-board-scan providers (workday)", async () => {
+    // Audit 2026-08-21 §4: paged adapters (workday/smartrecruiters/taleo)
+    // fetch only the newest page. A tracked job pushed off page 1 is still
+    // live — marking it missing falsely inactivated it after ~8 min and
+    // re-alerted on the next churn cycle (the "Databricks vanished" episode).
+    const wdCompany: CompanyConfig = {
+      ...company,
+      id: "acme-wd",
+      name: "Acme WD",
+      provider: "workday",
+      boardKey: "acme.wd1.myworkdayjobs.com:acme:acme",
+      careersUrl: "https://acme.wd1.myworkdayjobs.com",
+    };
+    await env.DB.prepare("UPDATE companies SET provider=?, board_key=?, careers_url=? WHERE id=?")
+      .bind("workday", wdCompany.boardKey, wdCompany.careersUrl, company.id)
+      .run();
+
+    const wdJobs = {
+      total: 3,
+      jobPostings: [
+        {
+          title: "Software Engineering Intern",
+          externalPath: "/job/Austin-TX/SWE-Intern_JR100",
+          locationsText: "Austin, TX",
+          bulletFields: ["JR100"],
+        },
+        {
+          title: "Backend Engineer I",
+          externalPath: "/job/Remote/Backend-I_JR200",
+          locationsText: "Remote",
+          bulletFields: ["JR200"],
+        },
+        {
+          title: "Data Engineering Intern",
+          externalPath: "/job/NYC/Data-Intern_JR300",
+          locationsText: "New York, NY",
+          bulletFields: ["JR300"],
+        },
+      ],
+    };
+    stubWorkday(wdJobs);
+    await pollCompany(company.id); // baseline: 3 jobs persisted
+    expect(await countRows("jobs")).toBe(3);
+
+    // Churn pushes JR300 off page 1 (new posting took its slot).
+    stubWorkday({
+      total: 3,
+      jobPostings: [
+        wdJobs.jobPostings[0]!,
+        wdJobs.jobPostings[1]!,
+        {
+          title: "ML Platform Intern",
+          externalPath: "/job/Seattle/ML-JR400",
+          locationsText: "Seattle, WA",
+          bulletFields: ["JR400"],
+        },
+      ],
+    });
+    await backdateSource();
+    const churned = await pollCompany(company.id);
+    expect(churned.outcome.ok).toBe(true);
+    // JR300 must NOT accrue an absence.
+    const row = await rows("jobs", "external_job_id = 'JR300'");
+    expect(row[0]!.absent_count).toBe(0);
+    expect(row[0]!.status).toBe("baseline");
+
+    // And when JR400 appears it alerts normally (detection still works).
+    const jr400 = await rows("jobs", "external_job_id = 'JR400'");
+    expect(jr400).toHaveLength(1);
+    const notifs = await rows("notifications", `job_id = '${jr400[0]!.id}'`);
+    expect(notifs.length).toBe(1);
+  });
+
   it("reopens even when an earlier delivered notification row exists", async () => {
     stubBoard({ jobs });
     stubTelegram();
@@ -545,7 +630,7 @@ describe("inactive/reopen lifecycle", () => {
     // A NEW job is detected and alerted: delivered row exists.
     const extra = {
       id: 70011,
-      title: "Reopen Intern",
+      title: "Software Engineer Intern (Reopen)",
       location: { name: "Austin" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70011",
       updated_at: "2026-08-14T22:00:00Z",
@@ -776,7 +861,7 @@ describe("bounded notification retry", () => {
 
     const extra = {
       id: 70006,
-      title: "Retry Intern",
+      title: "Retry Software Engineer Intern",
       location: { name: "Denver" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70006",
       updated_at: "2026-08-14T19:00:00Z",
@@ -804,7 +889,7 @@ describe("bounded notification retry", () => {
 
     const extra = {
       id: 70007,
-      title: "Old Intern",
+      title: "Old Software Engineer Intern",
       location: { name: "Seattle" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70007",
       updated_at: "2026-08-14T19:30:00Z",
@@ -834,7 +919,7 @@ describe("bounded notification retry", () => {
 
     const extra = {
       id: 70009,
-      title: "Retry Fail Intern",
+      title: "Retry Fail Software Engineer Intern",
       location: { name: "Denver" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70009",
       updated_at: "2026-08-14T21:00:00Z",
@@ -919,7 +1004,7 @@ describe("duplicate-send guard", () => {
     // Simulate a job that was already notified (crash after send, before state).
     const extra = {
       id: 70008,
-      title: "Already Notified Intern",
+      title: "Already Notified Software Engineer Intern",
       location: { name: "Boston" },
       absolute_url: "https://boards.greenhouse.io/exampleai/jobs/70008",
       updated_at: "2026-08-14T20:00:00Z",

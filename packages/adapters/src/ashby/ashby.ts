@@ -50,6 +50,7 @@ type AshbyBoardResponse = { jobs?: AshbyJob[] };
 
 export class AshbyAdapter implements JobSourceAdapter {
   readonly provider = "ashby";
+  readonly partialBoardScan = true; // full board in one request
 
   private readonly fetch: FetchLike;
   private readonly timeoutMs: number;

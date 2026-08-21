@@ -96,6 +96,8 @@ function parseLocations(raw: string | null | undefined): string | undefined {
 
 export class TaleoAdapter implements JobSourceAdapter {
   readonly provider = "oracle";
+  // searchjobs returns one page: cannot witness absence.
+  readonly partialBoardScan = false;
 
   private readonly fetch: FetchLike;
   private readonly timeoutMs: number;

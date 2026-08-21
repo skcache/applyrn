@@ -244,7 +244,15 @@ export class PollService {
 
     const firstRun = !state?.lastSuccessAt;
     const existing = await this.repo.listJobsForCompany(company.id);
-    const decisions = await detectJobs({ company, fetched, existing, firstRun });
+    const decisions = (await detectJobs({ company, fetched, existing, firstRun })).filter((d) => {
+      // Partial-board adapters (workday/smartrecruiters/taleo fetch only the
+      // newest page) cannot WITNESS absence: a tracked job pushed off page 1
+      // by churn is still live. Marking it missing here falsely inactivated
+      // it after ~8 min and re-alerted on the next churn cycle (the
+      // "Databricks vanished then reappeared" episode, audit 2026-08-21 §4).
+      if (!adapter.partialBoardScan && d.kind === "missing") return false;
+      return true;
+    });
 
     // Post-fetch zone: everything here talks to D1 or Telegram. A failure
     // must NOT escape into runCycle and kill the other companies' work or

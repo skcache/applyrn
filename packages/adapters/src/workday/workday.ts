@@ -82,9 +82,12 @@ export function parseWorkdayBoardKey(boardKey: string): {
 function normalizePostedOn(raw: string | undefined): string | undefined {
   return raw?.trim() ? raw.trim() : undefined;
 }
+void normalizePostedOn; // kept for potential future use; NOT part of the payload (hash churn)
 
 export class WorkdayAdapter implements JobSourceAdapter {
   readonly provider = "workday";
+  // CXS rejects limit>20: page-1 view only, cannot witness absence.
+  readonly partialBoardScan = false;
 
   private readonly fetch: FetchLike;
   private readonly timeoutMs: number;
@@ -183,7 +186,6 @@ export class WorkdayAdapter implements JobSourceAdapter {
     const externalId = (Array.isArray(raw.bulletFields) && raw.bulletFields[0]) || raw.externalPath;
     const jobUrl = `${origin}${raw.externalPath}`;
     const title = raw.title;
-    const postedOn = normalizePostedOn(raw.postedOn);
 
     return {
       provider: "workday",
@@ -196,7 +198,10 @@ export class WorkdayAdapter implements JobSourceAdapter {
       // postedOn is human text, not a timestamp: honest labeled "observed".
       sourcePublishedAt: undefined,
       publicationTimeKind: "observed",
-      compensationText: postedOn ? `Posted ${postedOn}` : undefined,
+      // NOTE: deliberately NOT stored. postedOn is relative text ("Posted
+      // Today" -> "Posted 1 Day Ago" -> ...) that changes daily; putting it
+      // in compensationText churned the content hash every day, producing
+      // endless spurious "edited" decisions (audit 2026-08-21 §3.3/§5.9).
     };
   }
 }

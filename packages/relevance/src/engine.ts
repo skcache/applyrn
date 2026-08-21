@@ -23,8 +23,10 @@ import {
   DESCRIPTION_STRONG_SKILLS,
   EARLY_CAREER_MARKERS,
   ENGINEERING_TRACK_MARKERS,
+  FULL_TIME_MAX_WEEK_HOURS,
   MAX_EXPERIENCE_YEARS,
   NON_ENGINEERING_ROLE_MARKERS,
+  NON_SOFTWARE_DISCIPLINES,
   NON_US_REGIONS,
   SENIORITY_MARKERS,
   TITLE_STRONG_SKILLS,
@@ -93,6 +95,9 @@ function hasAny(text: string, list: readonly string[]): string | null {
 /** Friendly reason label for an early-career marker. */
 function earlyCareerLabel(marker: string): string {
   const m = marker.toLowerCase();
+  if (m.includes("part-time") || m.includes("part time") || m.includes("hours")) {
+    return "Part-time";
+  }
   if (m.startsWith("intern") || m.startsWith("co-op") || m === "coop" || m === "campus") {
     return "Internship";
   }
@@ -186,14 +191,42 @@ function seniorityMarker(title: string): string | null {
 
 /** Early-career signals: marker presence AND any stated years requirement,
  * computed independently — a contradicting requirement (e.g. an "internship"
- * that demands 5+ years) must still suppress. */
+ * that demands 5+ years) must still suppress. Hours-per-week phrasing
+ * ("15-20 hours per week") counts as a part-time marker when the top of the
+ * range is at most FULL_TIME_MAX_WEEK_HOURS. */
 function earlyCareerSignal(input: RelevanceInput): { marker?: string; maxYears?: number } {
   const titleMarker = earlyCareerMarker(input.title);
   const descMarker = input.descriptionPlain ? earlyCareerMarker(input.descriptionPlain) : null;
+  const hours = statedWeeklyHours(`${input.title} ${input.descriptionPlain ?? ""}`);
+  const hoursMarker =
+    hours !== null && hours <= FULL_TIME_MAX_WEEK_HOURS ? "part-time (hours)" : undefined;
   return {
-    marker: titleMarker ?? descMarker ?? undefined,
+    marker: titleMarker ?? descMarker ?? hoursMarker ?? undefined,
     maxYears: statedMaxYears(input) ?? undefined,
   };
+}
+
+/**
+ * Highest weekly-hours figure stated in hours-per-week phrasing ("15-20
+ * hours/week", "20 hrs per week", "up to 24 hours weekly"), or null when no
+ * such phrase exists. Only hour RANGES/caps count: "40 hours" alone is a
+ * full-time statement, not a marker.
+ */
+function statedWeeklyHours(text: string): number | null {
+  const figures: number[] = [];
+  const patterns = [
+    /(\d{1,2})\s*-\s*(\d{1,2})\s*(?:hours?|hrs?)\b/gi,
+    /(?:up to|max(?:imum)?|less than)\s+(\d{1,2})\s*(?:hours?|hrs?)\b/gi,
+    /(\d{1,2})\s*(?:hours?|hrs?)\s*(?:\/|per)\s*(?:week|wk)\b/gi,
+    /(\d{1,2})\s*(?:hours?|hrs?)\s+(?:weekly|a week)\b/gi,
+  ];
+  for (const re of patterns) {
+    for (const m of text.matchAll(re)) {
+      if (m[1]) figures.push(Number(m[1]));
+      if (m[2]) figures.push(Number(m[2]));
+    }
+  }
+  return figures.length ? Math.max(...figures) : null;
 }
 
 /**
@@ -225,12 +258,46 @@ function statedMaxYears(input: RelevanceInput): number | null {
  * Explicit non-engineering families (sales/marketing/design/PM/recruiter/...)
  * WIN over an "engineer" substring, per the user's stated scope — a "Sales
  * Engineer" or "Design Engineer" is out of scope even though it says engineer.
- * An early-career title with NO explicit family (e.g. "Summer Intern") is
- * IN scope: missing a plausible internship is worse than surfacing a mediocre
- * one (PRD), and the user's exclusion list is explicit rather than an
- * allow-list.
+ *
+ * 2026-08-21 hardening: the title itself must carry an explicit
+ * SOFTWARE/eng-track signal (software/swe/developer/backend/data/ml/infra/
+ * security-engineer/quant/... or a real tech skill like python/rust). A bare
+ * "Store Executive Intern" or "Culinary Service Associate" has none and is
+ * suppressed even though its description says "university"/"student".
  */
+function titleHasSoftwareSignal(title: string): string | null {
+  if (engineeringFamilyFor(title)) return engineeringFamilyFor(title);
+  // Real tech skills in the title also count ("Python Developer Intern",
+  // "React Engineer Intern").
+  return hasAny(title, TITLE_STRONG_SKILLS);
+}
+
 function roleFamilyOutOfScope(title: string, department?: string, team?: string): string | null {
+  // 1. Explicit non-software engineering disciplines win first ("Bridge
+  //    Engineer", "Process Engineer Intern") unless the title also carries a
+  //    software-specific marker ("Embedded Software Engineer" stays in).
+  if (hasAny(title, NON_SOFTWARE_DISCIPLINES)) {
+    // "Software"/"data"/"ml"/"backend" etc. override the discipline hit only
+    // when the software marker is itself explicit in the title.
+    const explicitSoftwareWord = hasAny(title, [
+      "software",
+      "swe",
+      "developer",
+      "programmer",
+      "backend",
+      "back end",
+      "frontend",
+      "front end",
+      "full-stack",
+      "fullstack",
+      "data engineer",
+      "data science",
+      "machine learning",
+      "ml engineer",
+      "firmware",
+    ]);
+    if (!explicitSoftwareWord) return "non-software engineering discipline";
+  }
   const roleText = (department ? `${title} ${department}` : title) + (team ? ` ${team}` : "");
   const nonEng = hasAny(roleText, NON_ENGINEERING_ROLE_MARKERS);
   return nonEng ?? null; // null → within scope (no excluded family matched)
@@ -339,7 +406,10 @@ export function evaluateRelevance(
     };
   }
 
-  // 3. Role family: software + data + ML engineering-track only.
+  // 3. Role family: software + data + ML engineering-track only. The TITLE
+  //    itself must carry the software signal (2026-08-21): descriptions are
+  //    not consulted here, so "Store Executive Intern" (description: "for
+  //    university students!") cannot ride an early-career marker into scope.
   const nonEng = roleFamilyOutOfScope(input.title, input.department, input.team);
   if (nonEng) {
     return {
@@ -347,6 +417,14 @@ export function evaluateRelevance(
       reasons: [],
       suppressed: true,
       suppressionReason: `Non-engineering role (${nonEng})`,
+    };
+  }
+  if (!titleHasSoftwareSignal(input.title)) {
+    return {
+      score: 0,
+      reasons: [],
+      suppressed: true,
+      suppressionReason: "No software/engineering signal in title (scope: SWE/data/ML only)",
     };
   }
 

@@ -95,6 +95,9 @@ function htmlToPlainText(html: string | undefined): string | undefined {
 
 export class SmartRecruitersAdapter implements JobSourceAdapter, SupportsJobDetail {
   readonly provider = "smartrecruiters";
+  // List endpoint is paged (limit clamps at 100): a partial view cannot
+  // witness absence — detection must not mark unseen jobs missing.
+  readonly partialBoardScan = false;
 
   private readonly fetch: FetchLike;
   private readonly timeoutMs: number;

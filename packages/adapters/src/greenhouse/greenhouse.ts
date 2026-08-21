@@ -55,6 +55,7 @@ export function htmlToPlainText(html: string | undefined): string | undefined {
 
 export class GreenhouseAdapter implements JobSourceAdapter {
   readonly provider = "greenhouse";
+  readonly partialBoardScan = true; // full board in one request
 
   private readonly fetch: FetchLike;
   private readonly timeoutMs: number;

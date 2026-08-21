@@ -31,6 +31,17 @@ export interface JobSourceAdapter {
   /** Provider id, e.g. "greenhouse". Must match companies.provider. */
   provider: string;
 
+  /**
+   * True when fetchBoard returns the COMPLETE board (greenhouse/ashby/lever).
+   * False when it fetches only the newest page (workday/smartrecruiters/
+   * taleo): a partial view can NOT witness absence, so the detection engine
+   * must never mark jobs missing from these providers — otherwise any job
+   * pushed off page 1 by churn is falsely inactivated and re-alerted when
+   * churn brings it back (verified 2026-08-21; the "Databricks vanished"
+   * episode).
+   */
+  readonly partialBoardScan: boolean;
+
   /** Fetch the raw board payload for a company. */
   fetchBoard(company: CompanyConfig, ctx?: FetchContext): Promise<RawBoardResponse>;
 

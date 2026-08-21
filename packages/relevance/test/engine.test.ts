@@ -279,17 +279,18 @@ describe("positive signals and scoring", () => {
     }
   });
 
-  it("keeps an ambiguous early-career title in scope (no excluded family)", () => {
-    // "Intern" alone carries no excluded family (not sales/marketing/design/PM),
-    // so it stays in scope — missing a plausible internship is worse than
-    // surfacing a mediocre one (PRD). The exclusion list is explicit, not an
-    // allow-list.
+  it("suppresses a bare ambiguous title with no software signal (2026-08-21)", () => {
+    // REVERSED 2026-08-21: the old rule kept bare "Intern" in scope ("missing
+    // a plausible internship is worse"), but the production alert log filled
+    // with Store/Culinary/Events interns riding that allowance. The title
+    // must now carry an explicit software/eng-track signal.
     const r = evaluateRelevance({
       title: "Intern",
       location: "San Francisco, CA",
       descriptionPlain: "We are hiring an intern for the summer.",
     });
-    expect(r.suppressed).toBe(false);
+    expect(r.suppressed).toBe(true);
+    expect(r.suppressionReason).toMatch(/No software/i);
   });
 });
 
@@ -323,5 +324,95 @@ describe("blanket: real-world cases the user flagged", () => {
       const r = evaluateRelevance({ title, location });
       expect(r.suppressed).toBe(true);
     }
+  });
+});
+
+describe("2026-08-21 hardening: title-level software signal required", () => {
+  it("suppresses every false positive from the 08-21 production alert log", () => {
+    const cases: [string, string][] = [
+      // Target posts one per store location; they flooded the alerts.
+      ["Store Executive Intern (Store Leadership Intern)", "Brooklyn, NY"],
+      ["Store Executive Intern – Bay 100", "Minneapolis, MN"],
+      // Dining-hall / campus-service roles.
+      ["Part-Time Culinary Service Associate | Columba Hall", "Notre Dame, IN"],
+      ["Clerk Intern", "Remote, US"],
+      // Non-software engineering disciplines.
+      ["Entry-Level Bridge Engineer", "San Francisco, CA"],
+      ["Manufacturing Technician I", "North Chicago, IL"],
+      ["Process Engineer Intern", "Houston, TX"],
+      ["Mechanical Engineering Intern", "Detroit, MI"],
+      // Events / generalist internships with zero tech signal.
+      ["Strategic Events Intern (Fall 2026)", "In-Office"],
+      // TAM leader slipped through as a non-engineering role.
+      ["Technical Account Management (TAM) Leader", "Remote"],
+    ];
+    for (const [title, location] of cases) {
+      const r = evaluateRelevance({ title, location });
+      expect(r.suppressed, `${title} must be suppressed`).toBe(true);
+    }
+  });
+
+  it("keeps genuinely in-scope titles that share words with the blocklist", () => {
+    const cases: string[] = [
+      "Software Engineer Intern",
+      "Data Science Intern",
+      "Backend Developer Intern",
+      "Full-Stack Software Engineering Intern",
+      "Machine Learning Intern",
+      "Site Reliability Engineer Intern",
+      "Security Engineer Intern",
+      "Python Developer Intern",
+      "Embedded Firmware Intern",
+      "Quantitative Developer Intern",
+      "DevOps Intern",
+      "Cloud Infrastructure Intern",
+    ];
+    for (const title of cases) {
+      const r = evaluateRelevance({ title, location: "San Francisco, CA" });
+      expect(r.suppressed, `${title} must stay in scope`).toBe(false);
+    }
+  });
+});
+
+describe("part-time software scope (2026-08-21 user addition)", () => {
+  it("admits part-time SWE titles without an intern marker", () => {
+    for (const title of [
+      "Part-Time Software Engineer",
+      "Part Time Software Developer",
+      "Part-Time Backend Engineer (Remote)",
+    ]) {
+      const r = evaluateRelevance({ title, location: "Remote, US" });
+      expect(r.suppressed, `${title} should be in scope`).toBe(false);
+      expect(r.reasons).toContain("Part-time");
+    }
+  });
+
+  it("admits hours-phrased roles ('15-20 hours per week')", () => {
+    const r = evaluateRelevance({
+      title: "Software Developer",
+      location: "Remote, US",
+      descriptionPlain: "This is a part-year role requiring 15-20 hours per week.",
+    });
+    expect(r.suppressed).toBe(false);
+  });
+
+  it("still suppresses part-time NON-software roles", () => {
+    for (const title of [
+      "Part-Time Store Associate",
+      "Part-Time Barista",
+      "Part-Time Receptionist",
+    ]) {
+      const r = evaluateRelevance({ title, location: "Remote, US" });
+      expect(r.suppressed, `${title} must stay suppressed`).toBe(true);
+    }
+  });
+
+  it("part-time does not override seniority gates", () => {
+    const r = evaluateRelevance({
+      title: "Part-Time Senior Software Engineer",
+      location: "Remote, US",
+    });
+    expect(r.suppressed).toBe(true);
+    expect(r.suppressionReason).toMatch(/Senior\/leadership/i);
   });
 });

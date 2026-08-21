@@ -219,6 +219,13 @@ export class PollScheduler implements Poller {
     // Heartbeat staleness: if the previous cycle finished longer ago than
     // the staleness window, the cron may have stopped firing. Record an
     // incident once (deduped via the open system event); clear on recovery.
+    //
+    // 2026-08-21 (user): system events are DB + log ONLY — no Telegram.
+    // The free-plan cron legitimately pauses for 15-60 min stretches
+    // (verified: ~10 incidents/day in prod), so a staleness ping is pure
+    // noise; real breakage shows up as missing job alerts, which still
+    // deliver normally. The dashboard/EDN reads system_events for the ops
+    // view, and the structured log keeps the observability trail.
     const status = priorStatus;
     if (status.lastPollAt) {
       const ageMs = Date.parse(now) - Date.parse(status.lastPollAt);
@@ -227,8 +234,6 @@ export class PollScheduler implements Poller {
         const message = `scheduler stale: last completed cycle ${formatAgeMs(ageMs)} ago`;
         await this.repo.recordSystemEvent("scheduler-stale", now, message);
         log.warn("scheduler.stale", { ageMs, lastPollAt: status.lastPollAt });
-        const sent = await this.poller.sendSystemAlert(`⚠️ ${message}`);
-        if (!sent) log.warn("scheduler.stale.alert_failed", { ageMs });
       } else if (open && Number.isFinite(ageMs) && ageMs <= HEARTBEAT_STALE_MS) {
         await this.repo.clearSystemEvents("scheduler-stale", now);
         log.info("scheduler.recovered", { lastPollAt: status.lastPollAt });

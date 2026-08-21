@@ -252,10 +252,12 @@ export const NON_US_REGIONS = [
 ] as const;
 
 /**
- * Early-career markers. A title/description containing any of these, or an
- * explicit experience requirement of at most MAX_EXPERIENCE_YEARS, puts the
- * role in scope. Scope is BOTH internships/co-ops AND full-time new-grad /
- * early-career roles (0-2 YoE), per the user.
+ * Early-career markers. A title containing any of these, or an explicit
+ * experience requirement of at most MAX_EXPERIENCE_YEARS, puts the role in
+ * scope. Scope is internships/co-ops, full-time new-grad / early-career
+ * (0-2 YoE), AND part-time software roles (2026-08-21 user addition:
+ * "everything and anything part-time software engineering", incl.
+ * hours-based phrasing like "15-20 hours").
  */
 export const EARLY_CAREER_MARKERS = [
   "intern",
@@ -294,7 +296,17 @@ export const EARLY_CAREER_MARKERS = [
   "level 1",
   "l1",
   "l3",
+  // Part-time is its own early-career lane (2026-08-21): "Part-Time Software
+  // Developer" carries no intern marker but is exactly the target realm.
+  "part-time",
+  "part time",
 ] as const;
+
+/**
+ * Hours-per-week phrasing that conveys part-time ("15-20 hours", "20 hrs per
+ * week"). Matched by regex in the engine, capped at FULL_TIME_MAX_WEEK_HOURS.
+ */
+export const FULL_TIME_MAX_WEEK_HOURS = 35;
 
 /** Hard cap on stated years-of-experience requirements (0-2 YoE allowed). */
 export const MAX_EXPERIENCE_YEARS = 2;
@@ -307,9 +319,12 @@ export const MAX_EXPERIENCE_YEARS = 2;
 export const SENIORITY_MARKERS = [
   "senior",
   "sr.",
+  "sr",
   "staff",
   "principal",
   "lead",
+  "leader",
+  "leadership",
   "manager",
   "director",
   "vp",
@@ -326,6 +341,49 @@ export const SENIORITY_MARKERS = [
   "iv",
   "v",
   "senior staff",
+] as const;
+
+/**
+ * Engineering DISCIPLINES that are not software/data/ML engineering. These
+ * WIN over the generic "engineer" marker: a "Bridge Engineer" or "Process
+ * Engineer Intern" carries "engineer" but is a different discipline entirely
+ * (2026-08-21: "Entry-Level Bridge Engineer" alerted at 70%). Explicitly
+ * software markers ("Software Engineer", "Data Engineer") still win over
+ * these via the software-signal check.
+ */
+export const NON_SOFTWARE_DISCIPLINES = [
+  "civil",
+  "structural",
+  "bridge",
+  "highway",
+  "mechanical",
+  "electrical",
+  // Hardware EE is out; embedded SOFTWARE stays reachable via
+  // "embedded software"/"firmware" software markers.
+  "electronics",
+  "aerospace",
+  "aeronautical",
+  "chemical",
+  "process engineer",
+  "process intern",
+  "manufacturing",
+  "industrial engineer",
+  "field service",
+  "field technician",
+  "maintenance",
+  "hvac",
+  "plumbing",
+  "petroleum",
+  "materials engineer",
+  "environmental engineer",
+  "agricultural",
+  "biomedical engineer",
+  "quality engineer",
+  "validation engineer",
+  "autocad",
+  "cad engineer",
+  "surveyor",
+  "construction",
 ] as const;
 
 /** Software / data / ML engineering-track role families (positive gate). */
@@ -466,6 +524,43 @@ export const NON_ENGINEERING_ROLE_MARKERS = [
   "executive assistant",
   "office manager",
   "receptionist",
+  // Retail / hospitality / campus-service lanes that kept leaking through
+  // generic early-career markers (2026-08-21 alert log): Target posts a
+  // "Store Executive Intern (Store Leadership Intern)" per store location;
+  // dining halls post "Culinary Service Associate".
+  "store",
+  "retail",
+  "clerk",
+  "cashier",
+  "culinary",
+  "kitchen",
+  "barista",
+  "server",
+  "waiter",
+  "hostess",
+  "merchandis",
+  "warehouse",
+  "stocker",
+  "forklift",
+  "driver",
+  "courier",
+  "housekeeping",
+  "janitorial",
+  "facilities",
+  "concierge",
+  "bellhop",
+  "events intern",
+  "event intern",
+  "hospitality",
+  "food service",
+  "food safety",
+  "dietary",
+  "nutrition",
+  "resident assistant",
+  "athletics",
+  "recreation",
+  "lifeguard",
+  "counselor",
 ] as const;
 
 /** Skills used to differentiate score (title matches weigh more). */

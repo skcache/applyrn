@@ -47,6 +47,7 @@ type LeverPosting = {
 
 export class LeverAdapter implements JobSourceAdapter {
   readonly provider = "lever";
+  readonly partialBoardScan = true; // full board in one request
 
   private readonly fetch: FetchLike;
   private readonly timeoutMs: number;

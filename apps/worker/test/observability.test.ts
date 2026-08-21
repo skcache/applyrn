@@ -301,7 +301,10 @@ describe("scheduler staleness heartbeat", () => {
     sendSystemAlert = vi.fn(async () => true);
   }
 
-  it("records an incident once and alerts once, then clears on recovery", async () => {
+  it("records an incident once (DB + log ONLY, never Telegram), clears on recovery", async () => {
+    // 2026-08-21 (user): staleness pings were noise — the free-plan cron
+    // legitimately pauses 15-60 min (~10 incidents/day in prod). Incidents
+    // are recorded for the dashboard/log; Telegram is never touched.
     const realNow = new Date().toISOString();
     await seedPollMetric({
       finished_at: new Date(Date.now() - HEARTBEAT_STALE_MS - 60_000).toISOString(),
@@ -309,22 +312,21 @@ describe("scheduler staleness heartbeat", () => {
     const stub = new StubPoller();
     const scheduler = new PollScheduler(repo(), stub as never);
 
-    // First run: stale (last cycle finished > 15 min ago) -> incident + alert.
+    // First run: stale (last cycle finished > 15 min ago) -> DB incident, NO alert.
     await scheduler.runCycle(realNow);
     expect(await repo().getOpenSystemEvent("scheduler-stale")).not.toBeNull();
-    expect(stub.sendSystemAlert).toHaveBeenCalledTimes(1);
-    expect(stub.sendSystemAlert).toHaveBeenCalledWith(expect.stringContaining("stale"));
+    expect(stub.sendSystemAlert).not.toHaveBeenCalled();
 
-    // Second run while still stale: no duplicate alert.
+    // Second run while still stale: still no ping.
     await scheduler.runCycle(new Date().toISOString());
-    expect(stub.sendSystemAlert).toHaveBeenCalledTimes(1);
+    expect(stub.sendSystemAlert).not.toHaveBeenCalled();
 
     // Recovery: a fresh cycle clears the incident.
     await scheduler.runCycle(new Date().toISOString());
     expect(await repo().getOpenSystemEvent("scheduler-stale")).toBeNull();
   });
 
-  it("does not alert on a fresh scheduler (no prior cycle)", async () => {
+  it("does not record anything on a fresh scheduler (no prior cycle)", async () => {
     const stub = new StubPoller();
     const scheduler = new PollScheduler(repo(), stub as never);
     await scheduler.runCycle(NOW);

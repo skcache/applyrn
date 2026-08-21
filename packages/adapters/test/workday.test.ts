@@ -50,7 +50,9 @@ describe("WorkdayAdapter normalize", () => {
     );
     expect(first.applyUrl).toBe(first.jobUrl);
     expect(first.publicationTimeKind).toBe("observed");
-    expect(first.compensationText).toBe("Posted Posted Today");
+    // postedOn is deliberately NOT stored: relative text ("Posted Today" ->
+    // "Posted 1 Day Ago") churned the content hash daily -> spurious edits.
+    expect(first.compensationText).toBeUndefined();
   });
 
   it("falls back to the externalPath slug when there is no bullet field", async () => {
