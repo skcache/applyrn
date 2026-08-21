@@ -60,6 +60,14 @@ export const MAX_RETRY_SENDS_PER_INVOCATION = 10;
 export const RETRY_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
+ * Reopen cooldown (audit 2026-08-21 §5.8): a job that flips inactive ->
+ * reopened may only re-alert when it has been confirmed inactive for at
+ * least this long. Genuine reposts (days later) always clear; churn noise
+ * (drop + re-list within minutes) stays silent.
+ */
+export const REOPEN_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+/**
  * Hard per-invocation outbound-fetch ceiling (Cloudflare free plan: 50
  * subrequests). One list fetch per polled company is planned by the
  * scheduler (<= MAX_FETCHES_PER_INVOCATION); everything else — new-alert
@@ -325,10 +333,24 @@ export class PollService {
         }
         const relevance = shouldAlert(d) ? evaluateRelevance(toPersist) : undefined;
         upserts.push(await this.buildJobRecord(d, toPersist, now, relevance, existingById));
+        let suppressReopen = false;
         if (d.kind === "reopened") {
-          reopenIds.push(await jobId(job.provider, job.companyId, job.externalJobId));
+          // Reopen cooldown (audit 2026-08-21 §5.8): a repost is alertable
+          // again only after REOPEN_COOLDOWN_MS since it was confirmed
+          // inactive. Boards that briefly drop and re-list the same posting
+          // within minutes must not double-ping. The job still returns to
+          // active tracking (status 'reopened'); it just stays quiet.
+          const prev = existingById.get(
+            await jobId(job.provider, job.companyId, job.externalJobId),
+          );
+          const inactiveAt = prev?.confirmedInactiveAt ? Date.parse(prev.confirmedInactiveAt) : NaN;
+          suppressReopen =
+            !Number.isNaN(inactiveAt) && Date.parse(now) - inactiveAt < REOPEN_COOLDOWN_MS;
+          if (!suppressReopen) {
+            reopenIds.push(prev!.id);
+          }
         }
-        if (shouldAlert(d) && relevance && !relevance.suppressed) {
+        if (shouldAlert(d) && relevance && !relevance.suppressed && !suppressReopen) {
           alertable.push({
             job: toPersist,
             relevance,

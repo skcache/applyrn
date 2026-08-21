@@ -280,6 +280,14 @@ export class PollScheduler implements Poller {
       agg.newJobs += o.newJobs;
       byShard.set(key, agg);
     }
+    // Quiet-cycle heartbeat (audit 2026-08-21 §5.2): a cycle that polls
+    // nothing (whole shard in backoff / not due) previously wrote NO metric
+    // row, so MAX(finished_at) aged past HEARTBEAT_STALE_MS and recorded a
+    // false "scheduler stale" incident although the cron was alive. Always
+    // write one row per invocation so the heartbeat reflects cron liveness.
+    if (byShard.size === 0) {
+      byShard.set("quiet", { successful: 0, failed: 0, newJobs: 0, polled: 0 });
+    }
     for (const [shard, agg] of byShard) {
       await this.repo.insertPollMetric({
         provider: shard.split(":")[0]!,

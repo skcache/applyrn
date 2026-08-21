@@ -534,6 +534,14 @@ describe("inactive/reopen lifecycle", () => {
     const inactive = await rows("jobs", "external_job_id = '70002'");
     expect(inactive[0]!.status).toBe("inactive");
 
+    // Age the inactive stamp past REOPEN_COOLDOWN_MS so this represents a
+    // GENUINE repost (a minutes-old inactive flip must stay silent).
+    await env.DB.prepare(
+      "UPDATE jobs SET confirmed_inactive_at = ? WHERE external_job_id = '70002'",
+    )
+      .bind(new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString())
+      .run();
+
     // Job reposted: must alert again (reopened).
     const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
     stubTelegram({ capture: calls });
@@ -622,6 +630,34 @@ describe("inactive/reopen lifecycle", () => {
     expect(notifs.length).toBe(1);
   });
 
+  it("stays silent when a minutes-old inactive job reappears (reopen cooldown)", async () => {
+    stubBoard({ jobs });
+    stubTelegram();
+    await pollCompany("example-ai"); // baseline
+
+    // Two absences => 70002 goes inactive just now (NOT aged).
+    const reduced = jobs.filter((j) => j.id !== 70002);
+    stubBoard({ jobs: reduced });
+    await backdateSource();
+    await pollCompany("example-ai");
+    await backdateSource();
+    await pollCompany("example-ai");
+    const inactive = await rows("jobs", "external_job_id = '70002'");
+    expect(inactive[0]!.status).toBe("inactive");
+
+    // Reappears immediately: within REOPEN_COOLDOWN_MS -> NO new alert.
+    const calls: { text: string; chatId: string; buttons: unknown[] }[] = [];
+    stubTelegram({ capture: calls });
+    stubBoard({ jobs });
+    await backdateSource();
+    const { outcome } = await pollCompany("example-ai");
+    expect(outcome.ok).toBe(true);
+    expect(calls).toHaveLength(0); // cooldown held
+    // The job is restored to active tracking, just without a duplicate ping.
+    const row = await rows("jobs", "external_job_id = '70002'");
+    expect(row[0]!.status).toBe("reopened");
+  });
+
   it("reopens even when an earlier delivered notification row exists", async () => {
     stubBoard({ jobs });
     stubTelegram();
@@ -656,6 +692,13 @@ describe("inactive/reopen lifecycle", () => {
     await pollCompany("example-ai");
     const gone = await rows("jobs", "external_job_id = '70011'");
     expect(gone[0]!.status).toBe("inactive");
+
+    // Age the inactive stamp past REOPEN_COOLDOWN_MS: a GENUINE repost.
+    await env.DB.prepare(
+      "UPDATE jobs SET confirmed_inactive_at = ? WHERE external_job_id = '70011'",
+    )
+      .bind(new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString())
+      .run();
 
     // Reposted: the old delivered row must NOT suppress the reopen alert.
     const reopenCalls: { text: string; chatId: string; buttons: unknown[] }[] = [];
