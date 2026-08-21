@@ -20,9 +20,14 @@ import {
  */
 
 const API_BASE = "https://api.ashbyhq.com/posting-api/job-board";
-const REQUEST_TIMEOUT_MS = 10_000;
-/** Reject boards larger than this; guards against runaway payloads. */
-const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 15_000;
+/**
+ * Reject boards larger than this; guards against runaway payloads.
+ * Ashby's posting-api embeds the FULL job description per job (unlike
+ * Greenhouse's list payload), so big boards are genuinely large:
+ * OpenAI's is ~12.3MB across 752 postings (verified live 2026-08-21).
+ */
+const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 
 type AshbyJob = {
   id?: string;
