@@ -63,7 +63,11 @@ function installFetchStub(routes: FetchRoute[]) {
 const jsonReply = (body: Json, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-function stubBoard(payload: Json, status = 200, boardKey = "exampleai") {
+function stubBoard(
+  payload: { jobs: Record<string, unknown>[] },
+  status = 200,
+  boardKey = "exampleai",
+) {
   const board = `https://boards-api.greenhouse.io/v1/boards/${boardKey}/jobs`;
   installFetchStub([
     {
