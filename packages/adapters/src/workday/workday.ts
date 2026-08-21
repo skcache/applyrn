@@ -133,6 +133,11 @@ export class WorkdayAdapter implements JobSourceAdapter {
   async fetchBoard(company: CompanyConfig, ctx?: FetchContext): Promise<RawBoardResponse> {
     const { origin, tenant, siteId } = parseWorkdayBoardKey(company.boardKey);
     const url = `${origin}/wday/cxs/${encodeURIComponent(tenant)}/${encodeURIComponent(siteId)}/jobs`;
+    // Live CXS rejects limit > 20 with HTTP 400 (verified against nvidia
+    // 2026-08-21: limit=100 -> {"errorCode":"HTTP_400"}, limit=20 -> 200).
+    // One page per poll cycle: detection is incremental (new postings are
+    // found by diffing against persisted state), so paging the full board
+    // is unnecessary for correctness — the newest postings sort first.
     const res = await this.request(url, ctx, {
       method: "POST",
       headers: {
@@ -140,7 +145,7 @@ export class WorkdayAdapter implements JobSourceAdapter {
         "Content-Type": "application/json",
         "Accept-Language": "en-US",
       },
-      body: JSON.stringify({ appliedFacets: {}, searchText: "", limit: 100, offset: 0 }),
+      body: JSON.stringify({ appliedFacets: {}, searchText: "", limit: 20, offset: 0 }),
     });
     try {
       return await res.json();

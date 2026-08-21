@@ -95,7 +95,8 @@ describe("WorkdayAdapter fetchBoard", () => {
         expect(url).toBe("https://abcfws.wd1.myworkdayjobs.com/wday/cxs/abcfws/abcfws/jobs");
         expect(init?.method).toBe("POST");
         const body = JSON.parse(String(init?.body));
-        expect(body).toMatchObject({ searchText: "", limit: 100, offset: 0 });
+        // Live CXS rejects limit > 20 (HTTP 400); the adapter pages at 20.
+        expect(body).toMatchObject({ searchText: "", limit: 20, offset: 0 });
         expect((init?.headers as Record<string, string> | undefined)?.["Accept-Language"]).toBe(
           "en-US",
         );
