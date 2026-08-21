@@ -58,6 +58,76 @@ export const MAX_RETRY_SENDS_PER_INVOCATION = 10;
 
 /** Minimum time between delivery attempts for the same notification. */
 export const RETRY_MIN_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Hard per-invocation outbound-fetch ceiling (Cloudflare free plan: 50
+ * subrequests). One list fetch per polled company is planned by the
+ * scheduler (<= MAX_FETCHES_PER_INVOCATION); everything else — new-alert
+ * sends, undelivered retries, detail enrichment — shares what is left.
+ * Blowing the cap turns every fetch past it into a network error, which
+ * silently kills the tail of the shard (the exact D-011 failure mode).
+ */
+export const SUBREQUEST_LIMIT_PER_INVOCATION = 50;
+
+/**
+ * Margin held back for incidental calls (staleness system alert, health
+ * probes) so planned traffic never consumes the absolute last slots.
+ */
+const BUDGET_SAFETY_MARGIN = 2;
+
+/**
+ * Detail enrichment is the lowest-priority fetch user: it only upgrades
+ * metadata (URL slug, description, authoritative timestamp). Without a cap
+ * a first-poll burst on a huge board (CityOfNewYork ~1.8k postings) would
+ * eat the whole extras pool and starve alert DELIVERY. Jobs whose
+ * enrichment is skipped still persist and still alert — SmartRecruiters
+ * bare-id URLs serve HTTP 200 directly, so the link works; the description
+ * simply stays empty until... it never re-enriches (accepted tradeoff:
+ * score loses the <=20-point description contribution, gates unaffected).
+ */
+export const MAX_DETAIL_ENRICH_PER_INVOCATION = 8;
+
+/**
+ * Shared fetch budget for one invocation. Single-threaded JS makes
+ * check-and-decrement atomic across awaits, so concurrent company polls
+ * (CONCURRENCY_LIMIT=4) can share one instance safely.
+ */
+export class FetchBudget {
+  private remaining: number;
+  private enrichUsed = 0;
+
+  private constructor(limit: number) {
+    this.remaining = Math.max(0, limit);
+  }
+
+  /** Build the budget left after `listFetches` planned list requests. */
+  static afterListFetches(listFetches: number): FetchBudget {
+    return new FetchBudget(SUBREQUEST_LIMIT_PER_INVOCATION - listFetches - BUDGET_SAFETY_MARGIN);
+  }
+
+  /** Reserve one subrequest for a send (alerts, retries). */
+  tryConsume(): boolean {
+    if (this.remaining <= 0) return false;
+    this.remaining--;
+    return true;
+  }
+
+  /** Reserve one subrequest for detail enrichment (own cap + shared pool). */
+  tryConsumeEnrichment(): boolean {
+    if (this.enrichUsed >= MAX_DETAIL_ENRICH_PER_INVOCATION) return false;
+    if (!this.tryConsume()) return false;
+    this.enrichUsed++;
+    return true;
+  }
+
+  get left(): number {
+    return this.remaining;
+  }
+
+  get enrichmentCount(): number {
+    return this.enrichUsed;
+  }
+}
 /** Stop retrying a notification after this age; keep the row for audit. */
 export const RETRY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -110,18 +180,34 @@ export class PollService {
     private readonly env: WorkerEnv,
   ) {}
 
-  /** Serialized entry point: concurrent cycles for the same company queue. */
-  pollCompany(company: CompanyConfig, now: string): Promise<PollOutcome> {
-    return this.gate.run(company.id, () => this.pollCompanyInner(company, now));
+  /**
+   * Serialized entry point: concurrent cycles for the same company queue.
+   * `opts.budget` lets the scheduler share one per-invocation fetch pool
+   * across all companies polled in this invocation; absent (manual
+   * single-company trigger), the company gets a fresh near-full budget.
+   */
+  pollCompany(
+    company: CompanyConfig,
+    now: string,
+    opts?: { budget?: FetchBudget },
+  ): Promise<PollOutcome> {
+    return this.gate.run(company.id, () => this.pollCompanyInner(company, now, opts));
   }
 
   /**
    * Poll one company. Never throws: failures are recorded in source_state
    * and returned in the outcome so one bad source cannot break the cycle.
    */
-  private async pollCompanyInner(company: CompanyConfig, now: string): Promise<PollOutcome> {
+  private async pollCompanyInner(
+    company: CompanyConfig,
+    now: string,
+    opts?: { budget?: FetchBudget },
+  ): Promise<PollOutcome> {
     const adapter = this.adapters.get(company.provider);
     const outcome: PollOutcome = { companyId: company.id, ok: false, newJobs: 0, alertsSent: 0 };
+    // Shared per-invocation fetch pool (undefined on manual single-company
+    // triggers, which get a fresh near-full budget instead).
+    const budget = opts?.budget ?? FetchBudget.afterListFetches(1);
     if (!adapter) {
       outcome.errorCode = "no_adapter";
       await this.repo.recordSourceFailure(company.id, now, "no_adapter");
@@ -212,10 +298,23 @@ export class PollService {
         // it here instead of over the whole board keeps cycles at cadence
         // for large boards (one detail fetch per alertable job, not per
         // job on the board).
-        const toPersist =
-          isDetailCapable(adapter) && d.kind !== "baseline"
-            ? await this.enrichJob(adapter, company, job)
-            : job;
+        //
+        // Budgeted: enrichment is the lowest-priority fetch user. When the
+        // shared invocation pool is drained, the job persists and alerts
+        // with list-level metadata only (SmartRecruiters bare-id URLs serve
+        // 200 directly; Greenhouse already has URLs on the list payload).
+        let toPersist = job;
+        if (
+          isDetailCapable(adapter) &&
+          d.kind !== "baseline" &&
+          (!budget || budget.tryConsumeEnrichment())
+        ) {
+          toPersist = await this.enrichJob(
+            adapter as JobSourceAdapter & SupportsJobDetail,
+            company,
+            job,
+          );
+        }
         const relevance = shouldAlert(d) ? evaluateRelevance(toPersist) : undefined;
         upserts.push(await this.buildJobRecord(d, toPersist, now, relevance, existingById));
         if (d.kind === "reopened") {
@@ -243,7 +342,7 @@ export class PollService {
       await this.repo.recordSourceSuccess(company.id, now, 200, String(fetched.length));
       outcome.ok = true;
       outcome.newJobs = alertable.length;
-      outcome.alertsSent = await this.notifyNew(company, alertable, now);
+      outcome.alertsSent = await this.notifyNew(company, alertable, now, budget);
       return outcome;
     } catch {
       outcome.errorCode = "persist_error";
@@ -323,11 +422,21 @@ export class PollService {
     };
   }
 
-  /** Send alerts for new/reopened jobs. Failures persist as undelivered. */
+  /**
+   * Send alerts for new/reopened jobs. Failures persist as undelivered.
+   *
+   * Budgeted: each send is an outbound subrequest. When the shared
+   * invocation pool is drained, the send is DEFERRED — recorded as an
+   * undelivered notification with errorCode `budget_deferred` — so the
+   * existing retryUndelivered path picks it up on a later cycle. A job is
+   * never dropped for lack of budget; delivery just moves to the next
+   * invocation (persist-before-notify, PRD acceptance 11).
+   */
   private async notifyNew(
     company: CompanyConfig,
     jobs: { job: NormalizedJob; relevance: RelevanceResult; kind: "new" | "reopened" }[],
     now: string,
+    budget?: FetchBudget,
   ): Promise<number> {
     const token = this.env.TELEGRAM_BOT_TOKEN;
     const chatId = this.env.TELEGRAM_CHAT_ID;
@@ -356,6 +465,20 @@ export class PollService {
       // a delivered row, or another isolate's in-flight send, refuses it.
       const claimed = await this.repo.claimNotificationSend(id, "telegram", now);
       if (!claimed) continue;
+
+      // Budget gate AFTER the claim: if the invocation pool is drained we
+      // record a deferred attempt (D1 write, no fetch), which leaves the
+      // row undelivered for retryUndelivered on a later cycle.
+      if (budget && !budget.tryConsume()) {
+        await this.repo.recordNotificationAttempt({
+          jobId: id,
+          channel: "telegram",
+          attemptedAt: now,
+          delivered: false,
+          errorCode: "budget_deferred",
+        });
+        continue;
+      }
 
       const text = renderAlertText({
         job,
@@ -398,7 +521,7 @@ export class PollService {
    * and notifications older than RETRY_MAX_AGE_MS are left for manual review
    * (the row stays, marked delivered=0, so the detection is never lost).
    */
-  async retryUndelivered(now: string): Promise<number> {
+  async retryUndelivered(now: string, opts?: { budget?: FetchBudget }): Promise<number> {
     const token = this.env.TELEGRAM_BOT_TOKEN;
     const chatId = this.env.TELEGRAM_CHAT_ID;
     if (!token || !chatId) return 0;
@@ -413,6 +536,9 @@ export class PollService {
       // or fails, so the bound counts attempts, not deliveries. The rest
       // stay queued and trickle out on later cycles.
       if (attempts >= MAX_RETRY_SENDS_PER_INVOCATION) break;
+      // Shared invocation pool: when the scheduler's budget is drained by
+      // list fetches + new-alert sends, retries stop and stay queued.
+      if (opts?.budget && !opts.budget.tryConsume()) break;
       const lastAttemptMs = Date.parse(n.attemptedAt);
       if (!Number.isFinite(lastAttemptMs)) continue;
       if (nowMs - lastAttemptMs < RETRY_MIN_INTERVAL_MS) continue; // throttle

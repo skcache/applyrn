@@ -1,6 +1,7 @@
 import type { CompanyConfig } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
 import type { PollOutcome } from "./poll.js";
+import { FetchBudget } from "./poll.js";
 import { log } from "./logger.js";
 
 /**
@@ -22,8 +23,12 @@ import { log } from "./logger.js";
 
 /** A poller can run one company through the detect/persist/notify cycle. */
 export interface Poller {
-  pollCompany(company: CompanyConfig, now: string): Promise<PollOutcome>;
-  retryUndelivered(now: string): Promise<number>;
+  pollCompany(
+    company: CompanyConfig,
+    now: string,
+    opts?: { budget?: FetchBudget },
+  ): Promise<PollOutcome>;
+  retryUndelivered(now: string, opts?: { budget?: FetchBudget }): Promise<number>;
   /** System-level notice (e.g. scheduler staleness). Best-effort. */
   sendSystemAlert(message: string): Promise<boolean>;
 }
@@ -169,11 +174,20 @@ export class PollScheduler implements Poller {
       due.push(company);
     }
 
+    // One shared fetch budget for the whole invocation: list fetches are
+    // planned (due.length), everything else — alert sends, undelivered
+    // retries, detail enrichment — draws from what remains under the
+    // free-plan 50-subrequest cap. Priority is encoded by who checks the
+    // pool and when: sends gate before sending (deferring to the retry
+    // queue when drained), retries stop when the pool is empty, and
+    // enrichment is additionally capped at MAX_DETAIL_ENRICH_PER_INVOCATION
+    // so a first-poll burst on a huge board cannot starve delivery.
+    const budget = FetchBudget.afterListFetches(due.length);
     const outcomes = await mapWithConcurrency(due, CONCURRENCY_LIMIT, (company) =>
-      this.poller.pollCompany(company, now),
+      this.poller.pollCompany(company, now, { budget }),
     );
 
-    const retried = await this.poller.retryUndelivered(now);
+    const retried = await this.poller.retryUndelivered(now, { budget });
 
     await this.recordMetrics(companies, outcomes, now, Date.now() - startedAt);
 
@@ -225,12 +239,16 @@ export class PollScheduler implements Poller {
   }
 
   /** Poller contract passthrough (single-company manual trigger). */
-  pollCompany(company: CompanyConfig, now: string): Promise<PollOutcome> {
-    return this.poller.pollCompany(company, now);
+  pollCompany(
+    company: CompanyConfig,
+    now: string,
+    opts?: { budget?: FetchBudget },
+  ): Promise<PollOutcome> {
+    return this.poller.pollCompany(company, now, opts);
   }
 
-  retryUndelivered(now: string): Promise<number> {
-    return this.poller.retryUndelivered(now);
+  retryUndelivered(now: string, opts?: { budget?: FetchBudget }): Promise<number> {
+    return this.poller.retryUndelivered(now, opts);
   }
 
   sendSystemAlert(message: string): Promise<boolean> {
