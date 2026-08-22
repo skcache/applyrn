@@ -48,7 +48,10 @@ async function probe(row) {
         clearTimeout(t);
         if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
         const body = await res.json();
-        return { ok: Array.isArray(body.jobPostings), reason: `${body.jobPostings?.length ?? 0} postings` };
+        return {
+          ok: Array.isArray(body.jobPostings),
+          reason: `${body.jobPostings?.length ?? 0} postings`,
+        };
       }
       default:
         return { ok: false, reason: "unknown provider" };
@@ -83,5 +86,8 @@ for (const row of candidates) {
   }
 }
 console.log(`\nvalidated: ${validated.length} / failed: ${failed.length}`);
-writeFileSync(path.join(os.tmpdir(), "simplify-validated.json"), JSON.stringify(validated, null, 2));
+writeFileSync(
+  path.join(os.tmpdir(), "simplify-validated.json"),
+  JSON.stringify(validated, null, 2),
+);
 writeFileSync(path.join(os.tmpdir(), "simplify-failed.json"), JSON.stringify(failed, null, 2));

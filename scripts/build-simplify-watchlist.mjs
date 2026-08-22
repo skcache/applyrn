@@ -56,7 +56,11 @@ function atsOf(url) {
 }
 
 const slug = (name) =>
-  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
 
 const rows = [];
 for (const d of listings) {
@@ -77,7 +81,4 @@ for (const d of listings) {
 }
 console.log(`candidates: ${rows.length}`);
 console.log(JSON.stringify(rows.slice(0, 8), null, 1));
-writeFileSync(
-  path.join(os.tmpdir(), "simplify-candidates.json"),
-  JSON.stringify(rows, null, 2),
-);
+writeFileSync(path.join(os.tmpdir(), "simplify-candidates.json"), JSON.stringify(rows, null, 2));
