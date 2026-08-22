@@ -27,7 +27,7 @@ function fakeBrowser(
 ): BrowserLike {
   return {
     async goto() {},
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     evaluate: (async (fn: string) => {
       // The next-step probe runs a snippet mentioning "submit application";
       // the inventory probe serializes the fields list.
@@ -39,7 +39,7 @@ function fakeBrowser(
         selector: f.selector,
       }));
     }) as never,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     evaluateWithArgs: (async () => null) as never,
     async type(selector: string, _value: string) {
       const f = fields.find((x) => x.selector === selector);

@@ -41,7 +41,9 @@ export function inventoryFields(): InventoryField[] {
       try {
         const label = document.querySelector(`label[for="${CSS.escape(id)}"]`);
         if (label && label.textContent && label.textContent.trim()) return label.textContent.trim();
-      } catch {}
+      } catch {
+        // Malformed id (CSS.escape failure): fall through to other label sources.
+      }
     }
     const wrapping = el.closest("label");
     if (wrapping && wrapping.textContent && wrapping.textContent.trim())

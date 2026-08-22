@@ -160,7 +160,6 @@ async function cmdStart(jobId) {
 async function cmdListen() {
   let offset = 0;
   console.log("Listening for Telegram callbacks… (Ctrl-C to stop)");
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const updates = await tg("getUpdates", { timeout: 25, offset });
     for (const u of updates.result ?? []) {

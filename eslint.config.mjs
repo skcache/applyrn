@@ -15,8 +15,9 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Node scripts (watchlist/soak tooling) run outside the browser/worker.
-    files: ["scripts/**/*.mjs"],
+    // Node scripts (watchlist/soak tooling + the V2 apply CLI) run outside
+    // the browser/worker.
+    files: ["scripts/**/*.mjs", "apps/apply-cli/**/*.mjs", "packages/apply/scripts/*.mjs"],
     languageOptions: {
       globals: {
         console: "readonly",

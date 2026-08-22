@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApplicationRunner, type RunnerHooks, type TelegramAction } from "../src/runner.js";
+import { ApplicationRunner, type RunnerHooks } from "../src/runner.js";
 import type { ApplicationProfile } from "../src/profile.js";
 import type { ApplicationSession } from "../src/session.js";
 import type { BrowserLike } from "../src/browser-agent.js";
@@ -14,22 +14,6 @@ const profile: ApplicationProfile = {
   labelStopList: ["salary"],
 };
 
-function makeSession(overrides: Partial<ApplicationSession> = {}): ApplicationSession {
-  return {
-    id: "s1",
-    jobId: "j1",
-    company: "Example AI",
-    jobTitle: "Software Engineer Intern",
-    applyUrl: "https://boards.greenhouse.io/exampleai/jobs/70001",
-    status: "pending_approval",
-    createdAt: "2026-08-22T00:00:00Z",
-    updatedAt: "2026-08-22T00:00:00Z",
-    filled: [],
-    paused: [],
-    ...overrides,
-  };
-}
-
 type FakePage = {
   fields?: { label: string; required?: boolean; selector: string }[];
   hasNextStep?: boolean;
@@ -42,7 +26,7 @@ function fakeBrowserFactory(page: FakePage) {
     async goto(url) {
       calls.push(`goto:${url}`);
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     evaluate: (async (fn: string) => {
       if (fn.includes("submit application")) return page.hasNextStep ?? false;
       if (fn.includes("btn.click()")) {
@@ -56,7 +40,7 @@ function fakeBrowserFactory(page: FakePage) {
         selector: f.selector,
       }));
     }) as never,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     evaluateWithArgs: (async () => null) as never,
     async type(selector) {
       calls.push(`type:${selector}`);

@@ -14,7 +14,7 @@
  * wires them in. Nothing here talks to Telegram directly.
  */
 
-import type { ApplicationProfile, PausedFieldInput } from "./types.js";
+import type { ApplicationProfile } from "./types.js";
 import {
   approveRun,
   approveSubmission,
