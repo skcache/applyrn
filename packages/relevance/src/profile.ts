@@ -140,6 +140,54 @@ export const US_STATE_CODES = [
  * (UK, Germany, Japan, France, Denmark, Spain, Singapore, Ireland) plus the
  * common international remote hubs.
  */
+
+/**
+ * V3: well-known US metro identifiers that appear without a state suffix
+ * ("NYC", "SF", "Bay Area"). Not exhaustive — just the common short forms
+ * boards actually use; full "City, ST" pairs are covered by the state lists.
+ */
+export const US_METRO_IDENTIFIERS = [
+  "nyc",
+  "sf bay area",
+  "sf",
+  "silicon valley",
+  "los angeles",
+  "chicago",
+  "houston",
+  "phoenix",
+  "philadelphia",
+  "san antonio",
+  "san diego",
+  "dallas",
+  "san jose",
+  "austin",
+  "jacksonville",
+  "fort worth",
+  "columbus",
+  "charlotte",
+  "indianapolis",
+  "seattle",
+  "denver",
+  "boston",
+  "washington dc",
+  "dc",
+  "nashville",
+  "detroit",
+  "portland",
+  "las vegas",
+  "memphis",
+  "louisville",
+  "baltimore",
+  "milwaukee",
+  "albuquerque",
+  "atlanta",
+  "raleigh",
+  "minneapolis",
+  "new york city",
+  "orange county",
+  "bay area",
+];
+
 export const NON_US_REGIONS = [
   "uk",
   "united kingdom",

@@ -28,6 +28,7 @@ import {
   NON_ENGINEERING_ROLE_MARKERS,
   NON_SOFTWARE_DISCIPLINES,
   NON_US_REGIONS,
+  US_METRO_IDENTIFIERS,
   SENIORITY_MARKERS,
   TITLE_STRONG_SKILLS,
   US_STATE_CODES,
@@ -168,6 +169,7 @@ function looksUS(location: string | undefined): boolean {
   const remoteUSOnly = /(remote[^a-z](us|usa|us only|united states))|(us[^a-z]remote)/.test(loc);
   if (explicitUS || remoteUSOnly) return true;
   if (hasAny(loc, US_STATES_AND_TERRITORIES)) return true;
+  if (hasAny(loc, US_METRO_IDENTIFIERS)) return true;
   // US state codes can collide with real words; only treat a two-letter code
   // as a state when it follows a comma ("City, ST").
   const m = location.match(/, *([A-Za-z]{2})\b/);
