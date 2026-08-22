@@ -192,7 +192,9 @@ export default {
       const scheduler = buildScheduler(env);
       const summaries = [];
       for (let shard = 0; shard < status.shardCount; shard++) {
-        summaries.push(await scheduler.runCycle(new Date().toISOString(), { shard, trigger: "external-ping" }));
+        summaries.push(
+          await scheduler.runCycle(new Date().toISOString(), { shard, trigger: "external-ping" }),
+        );
       }
       return Response.json({ ticked: true, shards: summaries.length }, { headers: JSON_HEADERS });
     }

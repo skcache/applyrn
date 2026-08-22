@@ -158,9 +158,7 @@ describe("POST /api/tick (third trigger)", () => {
 
     // Board gains a job, then time passes beyond the tick window.
     stubBoard({ jobs });
-    await env.DB.prepare(
-      "UPDATE source_state SET last_success_at = ? WHERE company_id = ?",
-    )
+    await env.DB.prepare("UPDATE source_state SET last_success_at = ? WHERE company_id = ?")
       .bind(new Date(Date.now() - 300_000).toISOString(), company.id)
       .run();
     // Fresh-looking heartbeat from the primary cron would stand the tick
