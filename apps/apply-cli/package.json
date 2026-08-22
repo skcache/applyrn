@@ -1,0 +1,15 @@
+{
+  "name": "@applyrn/apply-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "applyrn-apply": "./bin/applyrn-apply.mjs"
+  },
+  "scripts": {
+    "typecheck": "node --check bin/applyrn-apply.mjs"
+  },
+  "dependencies": {
+    "@applyrn/apply": "workspace:*"
+  }
+}
