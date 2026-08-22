@@ -1,0 +1,16 @@
+name: Canary poll (one-shot)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  poll-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll canary company
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"companyId":"canary-test"}' \
+            "https://applyrn-worker.siddhankuwar116.workers.dev/api/poll/company"
