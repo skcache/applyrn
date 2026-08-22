@@ -27,6 +27,14 @@ const JSON_HEADERS = { "Content-Type": "application/json" };
 const OBSERVABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * /api/tick stand-down window: if the last completed cycle is fresher than
+ * this, an external pinger does nothing (the primary cron is healthy).
+ * 180s mirrors the GH fallback's staleness threshold — comfortably above
+ * the 2-min per-shard cadence, comfortably below the 5-min pinger period.
+ */
+const TICK_STALENESS_SECONDS = 180;
+
+/**
  * V0 access control (PRD 14): a single shared token. Data/mutating
  * endpoints require `Authorization: Bearer <DASHB...N>`.
  *
@@ -158,6 +166,37 @@ export default {
       return Response.json({ application: app }, { headers: JSON_HEADERS });
     }
 
+    if (request.method === "POST" && url.pathname === "/api/tick") {
+      // Third independent trigger (Phase 2): a free external pinger
+      // (cron-job.org / UptimeRobot) hits this every ~5 minutes. The gate is
+      // SERVER-SIDE so the pinger needs zero logic: if the last completed
+      // cycle is fresher than TICK_STALENESS_SECONDS (the primary cron is
+      // healthy), the tick stands down with {ticked: false}. When stale, ONE
+      // call sweeps EVERY shard sequentially (a pinger can't do matrix
+      // fan-out like GH Actions), staying under the per-invocation subrequest
+      // budget because each shard's due-list is bounded by shardCountFor.
+      //
+      // Auth: same shared bearer token as the rest of the API — the URL
+      // alone must never be able to drive cycles.
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const status = await repo.getSystemStatus();
+      const ageSec = status.lastPollAt
+        ? (Date.now() - Date.parse(status.lastPollAt)) / 1000
+        : Number.POSITIVE_INFINITY;
+      if (Number.isFinite(ageSec) && ageSec < TICK_STALENESS_SECONDS) {
+        return Response.json(
+          { ticked: false, reason: "fresh", lastPollAgeSeconds: Math.round(ageSec) },
+          { headers: JSON_HEADERS },
+        );
+      }
+      const scheduler = buildScheduler(env);
+      const summaries = [];
+      for (let shard = 0; shard < status.shardCount; shard++) {
+        summaries.push(await scheduler.runCycle(new Date().toISOString(), { shard, trigger: "external-ping" }));
+      }
+      return Response.json({ ticked: true, shards: summaries.length }, { headers: JSON_HEADERS });
+    }
+
     if (request.method === "POST" && url.pathname === "/api/poll") {
       if (!(await isAuthorized(request, env))) return unauthorized();
       // Optional ?shard=N lets an external fallback trigger cover a specific
@@ -167,6 +206,7 @@ export default {
       const shard = raw !== null && /^\d+$/.test(raw) ? Number(raw) : undefined;
       const summary = await buildScheduler(env).runCycle(new Date().toISOString(), {
         ...(shard !== undefined ? { shard } : {}),
+        trigger: "gh-fallback",
       });
       return Response.json({ summary }, { headers: JSON_HEADERS });
     }

@@ -943,11 +943,13 @@ export class D1Repository {
     newJobs: number;
     durationMs: number;
     latencyPercentiles?: { p50: number; p95: number; p99: number };
+    /** Which trigger drove this cycle (Phase 2 attribution). */
+    trigger?: string;
   }): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO poll_metrics (provider, shard, started_at, finished_at, companies_polled, successful, failed, new_jobs, duration_ms, request_latency_p50_ms, request_latency_p95_ms, request_latency_p99_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO poll_metrics (provider, shard, started_at, finished_at, companies_polled, successful, failed, new_jobs, duration_ms, request_latency_p50_ms, request_latency_p95_ms, request_latency_p99_ms, trigger)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         m.provider,
@@ -962,6 +964,7 @@ export class D1Repository {
         m.latencyPercentiles?.p50 ?? null,
         m.latencyPercentiles?.p95 ?? null,
         m.latencyPercentiles?.p99 ?? null,
+        m.trigger ?? null,
       )
       .run();
   }

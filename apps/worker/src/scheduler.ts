@@ -127,7 +127,7 @@ export class PollScheduler implements Poller {
   ) {}
 
   /** Run one full cycle. Never throws: per-company failures are isolated. */
-  async runCycle(now: string, opts?: { shard?: number }): Promise<CycleSummary> {
+  async runCycle(now: string, opts?: { shard?: number; trigger?: string }): Promise<CycleSummary> {
     const startedAt = Date.now();
     // Heartbeat baseline: capture the PREVIOUS cycle's finish before this
     // cycle writes its own metrics row, so staleness is measured against the
@@ -189,7 +189,7 @@ export class PollScheduler implements Poller {
 
     const retried = await this.poller.retryUndelivered(now, { budget });
 
-    await this.recordMetrics(companies, outcomes, now, Date.now() - startedAt);
+    await this.recordMetrics(companies, outcomes, now, Date.now() - startedAt, opts?.trigger);
 
     const durationMs = Date.now() - startedAt;
     const summary: CycleSummary = {
@@ -265,6 +265,7 @@ export class PollScheduler implements Poller {
     outcomes: PollOutcome[],
     now: string,
     durationMs: number,
+    trigger?: string,
   ): Promise<void> {
     const byShard = new Map<
       string,
@@ -299,6 +300,10 @@ export class PollScheduler implements Poller {
         failed: agg.failed,
         newJobs: agg.newJobs,
         durationMs,
+        // Which trigger drove this cycle (Phase 2 trigger attribution).
+        // Default "cf-cron" matches the scheduled() entrypoint; /api/poll
+        // passes "gh-fallback"; /api/tick passes "external-ping".
+        trigger: trigger ?? "cf-cron",
       });
     }
   }
