@@ -35,6 +35,46 @@ describe("location gate (US-only)", () => {
     }
   });
 
+  it("V3 regression: suppresses the exact Malaysia/Philippines leaks from 2026-08-22", () => {
+    const cases: [string, string][] = [
+      // Real alerts the user received before the fix:
+      ["Intern - Data Analytics", "Biñan City, LAGUNA, Philippines"],
+      ["Junior IT Developer", "Bayan Lepas, Penang, Malaysia"],
+      ["Internship - Software Engineering", "Petaling Jaya, Selangor, Malaysia"],
+      ["Intern, Firmware Engineering", "Petaling Jaya, Selangor, Malaysia"],
+      // Near-miss variants that must also hold:
+      ["Software Engineer Intern", "Manila, Philippines"],
+      ["Software Developer Intern", "Kuala Lumpur, Malaysia"],
+      ["Software Engineering Intern", "Ho Chi Minh City, Vietnam"],
+      ["Software Engineer Intern", "Jakarta, Indonesia"],
+      ["Software Engineering Intern", "Bangkok, Thailand"],
+    ];
+    for (const [title, location] of cases) {
+      const r = evaluateRelevance({ title, location });
+      expect(r.suppressed).toBe(true);
+      expect(r.suppressionReason).toMatch(/Outside US/i);
+    }
+  });
+
+  it("V3 regression: unknown/ambiguous locations suppress (allowlist semantics)", () => {
+    // A location that is neither recognizably US nor a known foreign marker
+    // must fail CLOSED — this is exactly how Penang leaked before.
+    for (const location of ["EMEA Region", "APAC", "Global", "Multiple Locations"]) {
+      const r = evaluateRelevance({
+        title: "Software Engineer Intern",
+        location,
+      });
+      expect(r.suppressed).toBe(true);
+    }
+    // Bare "Remote" stays eligible (US-board convention; foreign markers in a
+    // remote label are still caught by nonUSRegion first).
+    const r = evaluateRelevance({ title: "Software Engineer Intern", location: "Remote" });
+    expect(r.suppressed).toBe(false);
+    // Missing location stays eligible.
+    const r2 = evaluateRelevance({ title: "Software Engineer Intern" });
+    expect(r2.suppressed).toBe(false);
+  });
+
   it("does not suppress a US city that shares a foreign name (Paris, TX)", () => {
     // "London, KY" and "Paris, TX" are real US cities.
     for (const location of ["Paris, TX", "London, KY"]) {

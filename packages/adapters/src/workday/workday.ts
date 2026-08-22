@@ -148,6 +148,12 @@ export class WorkdayAdapter implements JobSourceAdapter {
         Accept: "application/json",
         "Content-Type": "application/json",
         "Accept-Language": "en-US",
+        // V3: several Workday tenants (GE Aerospace, Uline, Hitachi…) sit
+        // behind WAFs that 403 requests without a browser-like User-Agent.
+        // Identifying as ApplyRN/1.0 (+ the fetch marker Workday expects)
+        // resolves the block without impersonating a specific browser build.
+        "User-Agent": "Mozilla/5.0 (compatible; ApplyRN/2.0; +https://github.com/skcache/applyrn)",
+        "X-Requested-With": "XMLHttpRequest",
       },
       body: JSON.stringify({ appliedFacets: {}, searchText: "", limit: 20, offset: 0 }),
     });

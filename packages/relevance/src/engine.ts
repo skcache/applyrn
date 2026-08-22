@@ -177,10 +177,59 @@ function looksUS(location: string | undefined): boolean {
   return false;
 }
 
-/** US-only gate: suppress when an explicit non-US region is detected. */
+/**
+ * V3 audit fix A: non-US detection now covers the whole world by COUNTRY
+ * name plus major non-US cities/regions (the old list missed entire
+ * continents — Malaysia and the Philippines leaked through). Matched only
+ * against word boundaries via hasAny.
+ */
+const NON_US_COUNTRIES = [
+  // Americas (non-US)
+  "canada", "mexico", "brazil", "argentina", "chile", "colombia", "peru",
+  "uruguay", "paraguay", "bolivia", "ecuador", "venezuela", "guyana",
+  "suriname", "panama", "costa rica", "guatemala", "honduras", "nicaragua",
+  "el salvador", "belize", "cuba", "dominican republic", "haiti", "jamaica",
+  "puerto rico",
+  // Europe
+  "uk", "united kingdom", "england", "scotland", "wales", "northern ireland",
+  "ireland", "france", "germany", "spain", "portugal", "italy", "netherlands",
+  "belgium", "switzerland", "austria", "sweden", "norway", "denmark",
+  "finland", "iceland", "poland", "czech", "slovakia", "hungary", "romania",
+  "bulgaria", "greece", "croatia", "serbia", "slovenia", "estonia", "latvia",
+  "lithuania", "ukraine", "belarus", "russia", "turkey", "malta", "cyprus",
+  "luxembourg", "monaco",
+  // Middle East
+  "israel", "uae", "united arab emirates", "dubai", "abu dhabi", "saudi arabia",
+  "qatar", "kuwait", "bahrain", "oman", "jordan", "lebanon", "iraq", "iran",
+  // Africa
+  "egypt", "south africa", "nigeria", "kenya", "ghana", "morocco", "tunisia",
+  "ethiopia", "uganda", "tanzania", "algeria",
+  // Asia — South
+  "india", "pakistan", "bangladesh", "sri lanka", "nepal",
+  // Asia — Southeast (V3 audit: these were missing entirely)
+  "philippines", "philippine", "manila", "laguna", "binan", "biñan", "cebu",
+  "quezon", "makati", "taguig",
+  "malaysia", "malaysian", "kuala lumpur", "penang", "george town",
+  "petaling jaya", "selangor", "bayan lepas", "johor", "ipoh",
+  "singapore", "indonesia", "jakarta", "vietnam", "viet nam", "ho chi minh",
+  "hanoi", "thailand", "bangkok", "cambodia", "myanmar", "laos",
+  // Asia — East
+  "china", "beijing", "shanghai", "shenzhen", "beijing", "hangzhou", "suzhou",
+  "taiwan", "taipei", "hong kong", "macau", "japan", "tokyo", "osaka",
+  "kyoto", "yokohama", "south korea", "korea", "seoul", "busan", "mongolia",
+  // Oceania
+  "australia", "sydney", "melbourne", "brisbane", "perth", "new zealand",
+  "auckland", "wellington",
+];
+
+/**
+ * Non-US region detection for the allowlist gate: country names + major
+ * cities worldwide. A hit suppresses UNLESS a US state/city is also present
+ * ("Paris, TX" case).
+ */
 function nonUSRegion(location: string | undefined): string | null {
   if (!location) return null;
-  const detected = hasAny(location, NON_US_REGIONS);
+  const detected = hasAny(location, NON_US_REGIONS) ?? hasAny(location, NON_US_COUNTRIES);
   if (!detected) return null;
   // A US state/city next to the region (e.g. "Paris, TX" or "London, KY") is
   // a real US location and must not be suppressed.
@@ -407,14 +456,24 @@ export function evaluateRelevance(
 
   // --- Hard gates: any hit suppresses the normal alert (job still persisted). ---
 
-  // 1. US-only location.
+  // 1. US-only location (V3 audit fix A: allowlist semantics). A location
+  //    that is neither recognizably US nor absent now suppresses — previously
+  //    unknown locations fell through and alerted on title score alone,
+  //    which leaked Malaysia/Philippines postings. Bare "Remote" stays
+  //    eligible: the nonUSRegion check above already suppressed any location
+  //    carrying a known foreign marker, so a surviving "Remote" is treated
+  //    as US-remote (the dominant convention on US boards).
   const foreign = nonUSRegion(input.location);
-  if (foreign) {
+  const isBareRemote = /^\s*remote\s*$/i.test(input.location ?? "");
+  const usConfirmed = looksUS(input.location) || !input.location || isBareRemote;
+  if (foreign || !usConfirmed) {
     return {
       score: 0,
       reasons: [],
       suppressed: true,
-      suppressionReason: `Outside US (${foreign})`,
+      suppressionReason: foreign
+        ? `Outside US (${foreign})`
+        : `Location not identifiable as US (${input.location})`,
     };
   }
 
