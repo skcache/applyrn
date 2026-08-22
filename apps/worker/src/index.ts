@@ -79,7 +79,7 @@ export default {
     env: WorkerEnv,
     ctx: ExecutionContext,
   ): Promise<void> {
-    ctx.waitUntil(buildScheduler(env).runCycle(new Date().toISOString()));
+    ctx.waitUntil(buildScheduler(env).runCycle(new Date().toISOString(), { trigger: "cf-cron" }));
   },
 
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
