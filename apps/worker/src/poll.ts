@@ -77,6 +77,16 @@ export const REOPEN_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 export const MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE = 5;
 
 /**
+ * V3 Fix B (baseline catch-up): a newly added company's first poll stores its
+ * whole board as baseline — historically silent forever. If an in-scope role
+ * is ALREADY open when we start watching, the user wants to know. Catch-up:
+ * for companies created within this window, first-run baselines are scored
+ * and the top in-scope ones alert (still capped by MAX_NEW_ALERTS above and
+ * the fetch budget). 48h keeps historical reseeds silent.
+ */
+export const CATCHUP_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/**
  * Hard per-invocation outbound-fetch ceiling (Cloudflare free plan: 50
  * subrequests). One list fetch per polled company is planned by the
  * scheduler (<= MAX_FETCHES_PER_INVOCATION); everything else — new-alert
@@ -347,7 +357,15 @@ export class PollService {
             job,
           );
         }
-        const relevance = shouldAlert(d) ? evaluateRelevance(toPersist) : undefined;
+        // V3 Fix B (baseline catch-up): score baselines too when the company
+        // was just added — an already-open in-scope role at a newly watched
+        // company must alert once instead of sitting silent forever.
+        const catchupEligible =
+          d.kind === "baseline" &&
+          company.createdAt !== undefined &&
+          Date.parse(now) - Date.parse(company.createdAt) < CATCHUP_WINDOW_MS;
+        const relevance =
+          shouldAlert(d) || catchupEligible ? evaluateRelevance(toPersist) : undefined;
         upserts.push(await this.buildJobRecord(d, toPersist, now, relevance, existingById));
         let suppressReopen = false;
         if (d.kind === "reopened") {
@@ -366,16 +384,17 @@ export class PollService {
             reopenIds.push(prev!.id);
           }
         }
-        if (shouldAlert(d) && relevance && !relevance.suppressed && !suppressReopen) {
-          // Audit 2026-08-22 V9: cap NEW alerts per company per cycle. A
-          // board rotating externalJobIds would otherwise mint unlimited
-          // "new" jobs (cooldown is keyed on same-id history, so rotation
-          // bypasses it). Overflow persists + scores silently; only the
-          // first MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE alert.
-          if (d.kind === "new" && newAlertsThisCycle >= MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE) {
-            continue;
-          }
-          if (d.kind === "new") newAlertsThisCycle++;
+        const isAlertableDecision = shouldAlert(d) || (d.kind === "baseline" && catchupEligible);
+        if (
+          isAlertableDecision &&
+          relevance &&
+          !relevance.suppressed &&
+          !suppressReopen &&
+          newAlertsThisCycle < MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE
+        ) {
+          // V9 cap applies to NEW alerts; catch-up baselines count too so a
+          // huge first sweep can never flood the chat.
+          newAlertsThisCycle++;
           alertable.push({
             job: toPersist,
             relevance,
