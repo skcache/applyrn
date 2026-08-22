@@ -6,6 +6,7 @@ import {
   type JobSourceAdapter,
   type RawBoardResponse,
 } from "../types.js";
+import { readBodyWithCap } from "../body-cap.js";
 
 /**
  * Oracle Taleo public career-site adapter.
@@ -162,7 +163,9 @@ export class TaleoAdapter implements JobSourceAdapter {
       }),
     });
     try {
-      const text = await res.text();
+      // Audit 2026-08-22 V3: streamed read enforces the byte cap even for
+      // chunked (header-less) responses.
+      const text = await readBodyWithCap(res, MAX_RESPONSE_BYTES);
       const trimmed = text.trim();
       // Taleo can 200 with an HTML error envelope; catch it early.
       if (trimmed.startsWith("<") || trimmed.startsWith("An Error")) {

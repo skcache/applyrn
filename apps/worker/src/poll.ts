@@ -68,6 +68,15 @@ export const RETRY_MIN_INTERVAL_MS = 5 * 60 * 1000;
 export const REOPEN_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * Audit 2026-08-22 V9: max NEW-job alerts one company may raise per cycle.
+ * Boards minting rotating externalJobIds bypass every same-id guard, so
+ * this caps the spam ceiling; overflow still persists to the dashboard
+ * silently. A legitimate board never posts >5 genuinely new roles in a
+ * single 2-minute window.
+ */
+export const MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE = 5;
+
+/**
  * Hard per-invocation outbound-fetch ceiling (Cloudflare free plan: 50
  * subrequests). One list fetch per polled company is planned by the
  * scheduler (<= MAX_FETCHES_PER_INVOCATION); everything else — new-alert
@@ -288,6 +297,13 @@ export class PollService {
         now: string;
       }[] = [];
       const reopenIds: string[] = [];
+      // Audit 2026-08-22 V9 (id-rotation spam cap): a hostile board can mint
+      // a fresh externalJobId per poll, making every job "new" forever and
+      // bypassing the reopen cooldown (which is keyed on same-id history).
+      // Cap NEW-job alerts per company per cycle; the overflow still
+      // persists + scores into the dashboard but stays silent. A legitimate
+      // board never adds more than a handful of jobs per cycle.
+      let newAlertsThisCycle = 0;
       for (const d of decisions) {
         // Missing decisions carry no job: they must be dispatched BEFORE the
         // persist branch, which is keyed on jobOf(d) being non-null. Doing it
@@ -351,6 +367,15 @@ export class PollService {
           }
         }
         if (shouldAlert(d) && relevance && !relevance.suppressed && !suppressReopen) {
+          // Audit 2026-08-22 V9: cap NEW alerts per company per cycle. A
+          // board rotating externalJobIds would otherwise mint unlimited
+          // "new" jobs (cooldown is keyed on same-id history, so rotation
+          // bypasses it). Overflow persists + scores silently; only the
+          // first MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE alert.
+          if (d.kind === "new" && newAlertsThisCycle >= MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE) {
+            continue;
+          }
+          if (d.kind === "new") newAlertsThisCycle++;
           alertable.push({
             job: toPersist,
             relevance,
@@ -566,13 +591,23 @@ export class PollService {
       // or fails, so the bound counts attempts, not deliveries. The rest
       // stay queued and trickle out on later cycles.
       if (attempts >= MAX_RETRY_SENDS_PER_INVOCATION) break;
-      // Shared invocation pool: when the scheduler's budget is drained by
-      // list fetches + new-alert sends, retries stop and stay queued.
-      if (opts?.budget && !opts.budget.tryConsume()) break;
+      // Eligibility filters FIRST (audit 2026-08-22 V6): expired rows must
+      // never consume a budget unit — with the previous ordering, once ≥
+      // budget-many expired rows accumulated at the head of the ASC-sorted
+      // queue, every invocation burned its whole retry budget on no-op
+      // skips and real retries starved permanently.
       const lastAttemptMs = Date.parse(n.attemptedAt);
       if (!Number.isFinite(lastAttemptMs)) continue;
       if (nowMs - lastAttemptMs < RETRY_MIN_INTERVAL_MS) continue; // throttle
-      if (nowMs - lastAttemptMs > RETRY_MAX_AGE_MS) continue; // too old, stop
+      if (nowMs - lastAttemptMs > RETRY_MAX_AGE_MS) {
+        // Tombstone: mark the row expired so it leaves the queue for good
+        // and shows up in metrics instead of silently aging forever.
+        await this.repo.markNotificationExpired(n.jobId, n.channel, now);
+        continue;
+      }
+      // Shared invocation pool: only consumed when a send will actually
+      // follow the claim.
+      if (opts?.budget && !opts.budget.tryConsume()) break;
       const job = await this.repo.getJobById(n.jobId);
       if (!job) continue;
       const company = await this.repo.getCompany(job.companyId);

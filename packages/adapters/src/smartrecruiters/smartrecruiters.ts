@@ -7,6 +7,7 @@ import {
   type RawBoardResponse,
   type SupportsJobDetail,
 } from "../types.js";
+import { readJsonWithCap } from "../body-cap.js";
 
 /**
  * SmartRecruiters public Job Board API adapter.
@@ -146,7 +147,7 @@ export class SmartRecruitersAdapter implements JobSourceAdapter, SupportsJobDeta
   private async requestJson(url: string, ctx?: FetchContext): Promise<unknown> {
     const res = await this.request(url, ctx);
     try {
-      return await res.json();
+      return await readJsonWithCap(res, MAX_RESPONSE_BYTES);
     } catch {
       throw new AdapterError("malformed", `SmartRecruiters returned non-JSON: ${url}`);
     }

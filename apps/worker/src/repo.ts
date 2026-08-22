@@ -7,6 +7,7 @@ import {
   type JobStatus,
   type NotificationRecord,
   type SourceState,
+  shardCountFor,
 } from "@applyrn/domain";
 
 /**
@@ -313,6 +314,24 @@ export class D1Repository {
     }));
   }
 
+  /**
+   * Audit 2026-08-22 V8: freshness of a SINGLE shard's last cycle, used by
+   * the /api/poll stand-down gate. Shard keys are stored as text in
+   * poll_metrics.shard (provider:shard or "quiet"); the numeric shard key
+   * written by the tick/GH path is the bare number string, so match on the
+   * suffix after the last colon OR an exact numeric match.
+   */
+  async getLastShardPollAt(shardKey: string): Promise<string | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT MAX(finished_at) AS t FROM poll_metrics
+         WHERE shard = ? OR shard = 'greenhouse:' || ? OR shard LIKE '%:' || ?`,
+      )
+      .bind(shardKey, shardKey, shardKey)
+      .first();
+    return row?.t ? String(row.t) : undefined;
+  }
+
   /** System status: enabled company count, cadence, last successful poll. */
   async getSystemStatus(): Promise<{
     companyCount: number;
@@ -327,15 +346,18 @@ export class D1Repository {
       .prepare("SELECT MIN(poll_interval_seconds) AS c FROM companies WHERE enabled = 1")
       .first();
     const last = await this.db.prepare("SELECT MAX(finished_at) AS t FROM poll_metrics").first();
+    // Shard count MUST use the same hash-aware formula the scheduler uses
+    // (audit 2026-08-22 W2): a weaker ceil(n/40) under-counts whenever the
+    // id hash overfills a bucket, so /api/tick and the GitHub fallback
+    // matrix silently never covered the tail buckets during outages.
+    const ids = await this.db
+      .prepare("SELECT id FROM companies WHERE enabled = 1")
+      .all<{ id: string }>();
     return {
       companyCount: Number(count?.n ?? 0),
       cadenceSeconds: Number(cadence?.c ?? DEFAULT_POLL_INTERVAL_SECONDS),
       lastPollAt: last?.t ? String(last.t) : undefined,
-      // Free-plan subrequest cap: shard count = ceil(companies / fetch budget),
-      // so external fallback triggers know how many shards to cover.
-      // Mirrors MAX_FETCHES_PER_INVOCATION in scheduler.ts (repo can't import
-      // it without a scheduler -> repo cycle).
-      shardCount: Math.max(1, Math.ceil(Number(count?.n ?? 0) / 40)),
+      shardCount: shardCountFor((ids.results ?? []).map((r) => ({ id: r.id }))),
     };
   }
 
@@ -734,6 +756,17 @@ export class D1Repository {
         attempt.errorCode ?? null,
       )
       .run();
+    // Audit 2026-08-22 V7a: a FAILED attempt must not clobber a terminal
+    // 'expired' tombstone — the row would re-enter the retry queue and the
+    // expiry decision (already made) would be lost.
+    if (!attempt.delivered && attempt.errorCode !== "expired") {
+      await this.db
+        .prepare(
+          "UPDATE notifications SET error_code = 'expired' WHERE job_id = ? AND channel = ? AND error_code = 'expired'",
+        )
+        .bind(attempt.jobId, attempt.channel)
+        .run();
+    }
   }
 
   /**
@@ -748,6 +781,38 @@ export class D1Repository {
          WHERE job_id = ? AND channel = ? AND delivered = 1`,
       )
       .bind(jobId, channel)
+      .run();
+  }
+
+  /**
+   * Audit 2026-08-22 W7: retention sweep. D1 has no scheduled SQL and the
+   * free tier has no cron for it, so the 1-minute worker cron is the only
+   * $0 lever. Bounds: poll_metrics 14 days (heartbeat + soak evidence),
+   * terminal notifications (delivered or expired) 30 days, inactive jobs
+   * 90 days. Called once per cron cycle; cheap indexed deletes that no-op
+   * when there is nothing to prune.
+   */
+  async pruneOldData(now: string): Promise<void> {
+    const cutoffMs = Date.parse(now);
+    if (!Number.isFinite(cutoffMs)) return;
+    const metricsCutoff = new Date(cutoffMs - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const notifCutoff = new Date(cutoffMs - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const jobsCutoff = new Date(cutoffMs - 90 * 24 * 60 * 60 * 1000).toISOString();
+    await this.db
+      .prepare("DELETE FROM poll_metrics WHERE finished_at < ?")
+      .bind(metricsCutoff)
+      .run();
+    await this.db
+      .prepare(
+        "DELETE FROM notifications WHERE attempted_at < ? AND (delivered = 1 OR error_code = 'expired')",
+      )
+      .bind(notifCutoff)
+      .run();
+    await this.db
+      .prepare(
+        "DELETE FROM jobs WHERE status = 'inactive' AND confirmed_inactive_at IS NOT NULL AND confirmed_inactive_at < ?",
+      )
+      .bind(jobsCutoff)
       .run();
   }
 
@@ -790,8 +855,13 @@ export class D1Repository {
   }
 
   async listUndeliveredNotifications(): Promise<NotificationRecord[]> {
+    // Audit 2026-08-22 V6/V7a: 'expired' rows are terminal — they must NOT
+    // re-enter the retry queue (they previously sat at the ASC-sorted head
+    // consuming budget forever) but stay queryable for observability.
     const { results } = await this.db
-      .prepare("SELECT * FROM notifications WHERE delivered = 0 ORDER BY attempted_at")
+      .prepare(
+        "SELECT * FROM notifications WHERE delivered = 0 AND (error_code IS NULL OR error_code != 'expired') ORDER BY attempted_at",
+      )
       .all();
     return results.map((row) => ({
       id: Number(row.id),
@@ -802,6 +872,21 @@ export class D1Repository {
       latencyMs: row.latency_ms !== null ? Number(row.latency_ms) : undefined,
       errorCode: row.error_code ? String(row.error_code) : undefined,
     }));
+  }
+
+  /**
+   * Audit 2026-08-22 V6/V7a: tombstone a notification that exhausted its
+   * retry window. The row keeps its undelivered state (the job alert WAS
+   * lost) but leaves the retry queue and is visible to observability as
+   * error_code='expired' instead of silently aging forever.
+   */
+  async markNotificationExpired(jobId: string, channel: string, now: string): Promise<void> {
+    await this.db
+      .prepare(
+        "UPDATE notifications SET error_code = 'expired', attempted_at = ? WHERE job_id = ? AND channel = ? AND delivered = 0",
+      )
+      .bind(now, jobId, channel)
+      .run();
   }
 
   /** Read the latest notification row for a job/channel (duplicate-send guard). */

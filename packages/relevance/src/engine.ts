@@ -51,6 +51,14 @@ const DEFAULT_PROFILE: RelevanceProfile = {
   alertThreshold: 15,
 };
 
+/**
+ * Audit 2026-08-22 V2: hard cap on board-supplied description text used for
+ * scoring. All relevance signals (skills, hours, YoE, markers) appear in the
+ * first pages of any real posting; 64KB bounds the ~135 full-text scans per
+ * job and prevents a hostile multi-MB description from wedging the cycle.
+ */
+export const DESCRIPTION_CAP = 64 * 1024;
+
 export type RelevanceInput = {
   title: string;
   location?: string;
@@ -226,7 +234,12 @@ function statedWeeklyHours(text: string): number | null {
       if (m[2]) figures.push(Number(m[2]));
     }
   }
-  return figures.length ? Math.max(...figures) : null;
+  // Audit 2026-08-22: Math.max(...figures) throws RangeError when a hostile
+  // board packs ~150k matches into one description (spread exceeds the call
+  // stack). Fold with a loop instead — O(n), constant stack.
+  let max: number | null = null;
+  for (const f of figures) if (max === null || f > max) max = f;
+  return max;
 }
 
 /**
@@ -250,7 +263,10 @@ function statedMaxYears(input: RelevanceInput): number | null {
       if (m[2]) requirements.push(Number(m[2]));
     }
   }
-  return requirements.length ? Math.max(...requirements) : null;
+  // Audit 2026-08-22: same spread-crash fix as statedWeeklyHours.
+  let max: number | null = null;
+  for (const r of requirements) if (max === null || r > max) max = r;
+  return max;
 }
 
 /**
@@ -382,6 +398,13 @@ export function evaluateRelevance(
   input: RelevanceInput,
   profile: RelevanceProfile = DEFAULT_PROFILE,
 ): RelevanceResult {
+  // Audit 2026-08-22 V2: board-supplied descriptions are unbounded (Ashby
+  // boards embed full JDs; a hostile board can send megabytes). Cap BEFORE
+  // any scanning: every keyword/skill a relevance engine cares about appears
+  // in the first pages of a posting, so 64KB preserves legitimate scoring
+  // while bounding CPU (~135 full-text scans) and memory per job.
+  const descriptionPlain = input.descriptionPlain?.slice(0, DESCRIPTION_CAP);
+
   // --- Hard gates: any hit suppresses the normal alert (job still persisted). ---
 
   // 1. US-only location.
@@ -459,7 +482,7 @@ export function evaluateRelevance(
   }
 
   // 5. PhD is a hard body-signal regardless of level/marker.
-  if (PHD_PATTERN.test(input.title) || PHD_PATTERN.test(input.descriptionPlain ?? "")) {
+  if (PHD_PATTERN.test(input.title) || PHD_PATTERN.test(descriptionPlain ?? "")) {
     return {
       score: 0,
       reasons: [],
@@ -468,7 +491,7 @@ export function evaluateRelevance(
     };
   }
 
-  const { score, reasons } = scoreRole(input);
+  const { score, reasons } = scoreRole({ ...input, descriptionPlain });
   if (score < profile.alertThreshold) {
     return {
       score,

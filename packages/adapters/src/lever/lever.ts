@@ -6,6 +6,7 @@ import {
   type JobSourceAdapter,
   type RawBoardResponse,
 } from "../types.js";
+import { readJsonWithCap } from "../body-cap.js";
 
 /**
  * Lever public Postings API adapter.
@@ -100,7 +101,7 @@ export class LeverAdapter implements JobSourceAdapter {
     const url = `${API_BASE}/${encodeURIComponent(company.boardKey)}?mode=json`;
     const res = await this.request(url, ctx);
     try {
-      return await res.json();
+      return await readJsonWithCap(res, MAX_RESPONSE_BYTES);
     } catch {
       throw new AdapterError("malformed", `Lever returned non-JSON: ${url}`);
     }

@@ -9,8 +9,9 @@ import {
 import type { JobSourceAdapter } from "@applyrn/adapters";
 import type { ApplicationStatus } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
-import { PollService, type WorkerEnv } from "./poll.js";
+import { PollService, SUBREQUEST_LIMIT_PER_INVOCATION, type WorkerEnv } from "./poll.js";
 import { PollScheduler } from "./scheduler.js";
+import { log } from "./logger.js";
 
 /**
  * ApplyRN Worker: cron-driven poll cycle + minimal HTTP API.
@@ -138,8 +139,10 @@ export default {
     ) {
       if (!(await isAuthorized(request, env))) return unauthorized();
       const id = url.pathname.slice("/api/jobs/".length, -"/application".length);
-      const body = (await request.json().catch(() => ({}))) as { status?: string };
-      const status = body.status?.toUpperCase();
+      const body = (await request.json().catch(() => ({}))) as { status?: unknown };
+      // Audit 2026-08-22: non-string JSON values (number/object/array) used
+      // to throw on .toUpperCase() -> unhandled 500. Validate the type first.
+      const status = typeof body.status === "string" ? body.status.toUpperCase() : undefined;
       const valid: string[] = [
         "DETECTED",
         "SAVED",
@@ -190,13 +193,39 @@ export default {
         );
       }
       const scheduler = buildScheduler(env);
-      const summaries = [];
+      // Audit 2026-08-22 V5a: the sweep previously let each runCycle build a
+      // FRESH 50-subrequest FetchBudget, but Cloudflare's counter is per
+      // INVOCATION — after an outage (everything due) shard 0 alone consumed
+      // the cap and shards 1+ mass-failed with unbacked-off `network`
+      // errors while this endpoint still returned {ticked:true}. Fix:
+      // ONE shared budget across the whole sweep sized to the total due
+      // list; each shard isolated so one failure can't kill the rest; and
+      // the response reports per-shard ok/failed honestly.
+      const summaries: { shard: number; ok: number; failed: number }[] = [];
       for (let shard = 0; shard < status.shardCount; shard++) {
-        summaries.push(
-          await scheduler.runCycle(new Date().toISOString(), { shard, trigger: "external-ping" }),
-        );
+        try {
+          const summary = await scheduler.runCycle(new Date().toISOString(), {
+            shard,
+            trigger: "external-ping",
+            // Shared pool: the scheduler plans its own due-list fetches into
+            // this budget instead of assuming a fresh 50.
+            budgetPool: SUBREQUEST_LIMIT_PER_INVOCATION,
+          });
+          const ok = summary.outcomes.filter((o) => o.ok).length;
+          summaries.push({ shard, ok, failed: summary.outcomes.length - ok });
+        } catch (err) {
+          // One shard's unexpected throw must not kill the remaining shards.
+          summaries.push({ shard, ok: 0, failed: -1 });
+          log.error("tick.shard_failed", {
+            shard,
+            error: err instanceof Error ? err.name : "unknown",
+          });
+        }
       }
-      return Response.json({ ticked: true, shards: summaries.length }, { headers: JSON_HEADERS });
+      return Response.json(
+        { ticked: true, shards: summaries.length, results: summaries },
+        { headers: JSON_HEADERS },
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/poll") {
@@ -206,6 +235,38 @@ export default {
       // minute rotation. Invalid values fall back to the minute shard.
       const raw = url.searchParams.get("shard");
       const shard = raw !== null && /^\d+$/.test(raw) ? Number(raw) : undefined;
+      // Audit 2026-08-22 V8: same stand-down gate as /api/tick, scoped to
+      // the SHARD being requested (a shard-scoped trigger must not be gated
+      // on the global heartbeat — other shards may legitimately be fresher
+      // or staler). A hammering or misbehaving token-holder (the pinger
+      // service also holds this token) previously wrote an unbounded
+      // poll_metrics row per request — D1 write-quota amplification with
+      // no ceiling. When this shard cycled recently, stand down with
+      // zero writes.
+      const status = await repo.getSystemStatus();
+      const shardKey =
+        shard !== undefined && shard >= 0 && shard < status.shardCount
+          ? String(shard)
+          : String(Math.floor(Date.now() / 60_000) % Math.max(1, status.shardCount));
+      const lastShardPollAt = await repo.getLastShardPollAt(shardKey);
+      const ageSec = lastShardPollAt
+        ? (Date.now() - Date.parse(lastShardPollAt)) / 1000
+        : Number.POSITIVE_INFINITY;
+      if (Number.isFinite(ageSec) && ageSec < TICK_STALENESS_SECONDS) {
+        return Response.json(
+          {
+            summary: {
+              outcomes: [],
+              skippedBackoff: 0,
+              skippedInterval: status.companyCount,
+              retried: 0,
+              durationMs: 0,
+              stoodDown: true,
+            },
+          },
+          { headers: JSON_HEADERS },
+        );
+      }
       const summary = await buildScheduler(env).runCycle(new Date().toISOString(), {
         ...(shard !== undefined ? { shard } : {}),
         trigger: "gh-fallback",
@@ -215,8 +276,10 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/api/poll/company") {
       if (!(await isAuthorized(request, env))) return unauthorized();
-      const body = (await request.json().catch(() => ({}))) as { companyId?: string };
-      if (!body.companyId) {
+      const body = (await request.json().catch(() => ({}))) as { companyId?: unknown };
+      // Audit 2026-08-22: non-string companyId previously threw in the D1
+      // bind -> unhandled 500. Type-check before use.
+      if (!body.companyId || typeof body.companyId !== "string") {
         return Response.json(
           { error: "companyId required" },
           { status: 400, headers: JSON_HEADERS },

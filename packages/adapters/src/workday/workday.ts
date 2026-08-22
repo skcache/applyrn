@@ -6,6 +6,7 @@ import {
   type JobSourceAdapter,
   type RawBoardResponse,
 } from "../types.js";
+import { readJsonWithCap } from "../body-cap.js";
 
 /**
  * Workday public Candidate Experience (CXS) adapter.
@@ -151,7 +152,7 @@ export class WorkdayAdapter implements JobSourceAdapter {
       body: JSON.stringify({ appliedFacets: {}, searchText: "", limit: 20, offset: 0 }),
     });
     try {
-      return await res.json();
+      return await readJsonWithCap(res, MAX_RESPONSE_BYTES);
     } catch {
       throw new AdapterError("malformed", `Workday returned non-JSON: ${url}`);
     }
@@ -184,7 +185,24 @@ export class WorkdayAdapter implements JobSourceAdapter {
     // bulletFields[0] is the requisition id (e.g. "JR107575"); fall back to the
     // externalPath slug when absent so the id stays stable across polls.
     const externalId = (Array.isArray(raw.bulletFields) && raw.bulletFields[0]) || raw.externalPath;
-    const jobUrl = `${origin}${raw.externalPath}`;
+    // Audit 2026-08-22 V1 (phishing-pivot): externalPath is board-controlled.
+    // Raw concatenation let a value without a leading slash hijack the URL
+    // authority ("@evil.com/x" -> userinfo trick, host becomes evil.com;
+    // ".evil.com" -> attacker subdomain) while passing every scheme-only
+    // guard downstream — landing an attacker-host link in the APPLY NOW
+    // button. Real CXS paths always start with "/": enforce that, then pin
+    // the constructed URL to the expected origin host.
+    if (!raw.externalPath.startsWith("/")) {
+      return null; // hostile/malformed path: skip the row, never trust it
+    }
+    let jobUrl: string;
+    try {
+      const parsed = new URL(raw.externalPath, origin);
+      if (parsed.hostname !== new URL(origin).hostname) return null;
+      jobUrl = parsed.toString();
+    } catch {
+      return null;
+    }
     const title = raw.title;
 
     return {

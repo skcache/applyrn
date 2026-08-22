@@ -6,6 +6,7 @@ import {
   type JobSourceAdapter,
   type RawBoardResponse,
 } from "../types.js";
+import { readJsonWithCap } from "../body-cap.js";
 
 /**
  * Greenhouse public Job Board API adapter.
@@ -113,7 +114,7 @@ export class GreenhouseAdapter implements JobSourceAdapter {
   private async requestJson(url: string, ctx?: FetchContext): Promise<unknown> {
     const res = await this.request(url, ctx);
     try {
-      return await res.json();
+      return await readJsonWithCap(res, MAX_RESPONSE_BYTES);
     } catch {
       throw new AdapterError("malformed", `Greenhouse returned non-JSON: ${url}`);
     }

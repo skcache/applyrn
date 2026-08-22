@@ -1,4 +1,5 @@
 import type { CompanyConfig } from "@applyrn/domain";
+import { companyShard, minuteShard, shardCountFor } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
 import type { PollOutcome } from "./poll.js";
 import { FetchBudget } from "./poll.js";
@@ -55,46 +56,11 @@ export const CONCURRENCY_LIMIT = 4;
  */
 export const MAX_FETCHES_PER_INVOCATION = 40;
 
-/**
- * Smallest shard count whose worst bucket stays within MAX_FETCHES_PER_INVOCATION.
- *
- * ceil(n / MAX) is a lower bound but NOT a guarantee: the company-id hash
- * is imperfect and can overfill a bucket (measured: 160 ids -> 41 in one
- * bucket, 240 -> 42), and detail-enrichment + retry fetches share the same
- * invocation budget. A cycle that exceeds the soft budget eats into the
- * free-plan 50-subrequest hard cap and can silently kill the watchlist tail
- * (the D-011 failure mode), so shard count must be computed from the real
- * distribution, not just the list length.
- */
-export function shardCountFor(companies: readonly { id: string }[]): number {
-  let k = Math.max(1, Math.ceil(companies.length / MAX_FETCHES_PER_INVOCATION));
-  while (true) {
-    const buckets = new Array<number>(k).fill(0);
-    for (const c of companies) {
-      const b = companyShard(c.id, k);
-      const idx = b % k;
-      buckets[idx] = (buckets[idx] ?? 0) + 1;
-    }
-    let worst = 0;
-    for (const n of buckets) if (n > worst) worst = n;
-    if (worst <= MAX_FETCHES_PER_INVOCATION) return k;
-    k++; // one more shard reduces every bucket; iterate until within budget
-  }
-}
-
-/** Stable bucket for a company: same id always lands in the same shard. */
-export function companyShard(companyId: string, shardCount: number): number {
-  let h = 0;
-  for (let i = 0; i < companyId.length; i++) {
-    h = (h * 31 + companyId.charCodeAt(i)) >>> 0;
-  }
-  return h % shardCount;
-}
-
-/** Which shard runs on this minute; 1-min cron rotates shards round-robin. */
-export function minuteShard(now: string, shardCount: number): number {
-  return Math.floor(new Date(now).getTime() / 60_000) % shardCount;
-}
+// shardCountFor / companyShard / minuteShard moved to @applyrn/domain/shard
+// (audit 2026-08-22 W2): repo.ts's getSystemStatus and the scheduler MUST
+// agree on the shard count or the fallback triggers under-cover tail
+// buckets. Re-exported here so existing imports keep working.
+export { companyShard, minuteShard, shardCountFor } from "@applyrn/domain";
 
 /**
  * Scheduler is considered stale when no cycle finished within this window.
@@ -120,6 +86,22 @@ export type CycleSummary = {
   durationMs: number;
 };
 
+export type RunCycleOptions = {
+  shard?: number;
+  trigger?: string;
+  /**
+   * Audit 2026-08-22 V5a: when several cycles run inside ONE invocation
+   * (/api/tick sweeps all shards), Cloudflare's 50-subrequest counter is
+   * shared across them, but each cycle previously built a FRESH budget as
+   * if it owned the whole allowance. A caller that knows the invocation's
+   * total pool passes it here; the per-cycle due-list is then planned into
+   * that shared pool (first cycle reserves its fetches; later cycles see a
+   * drained pool and skip rather than mass-fail). Absent → fresh pool of
+   * SUBREQUEST_LIMIT_PER_INVOCATION (single-cycle invocations: cron).
+   */
+  budgetPool?: number;
+};
+
 export class PollScheduler implements Poller {
   constructor(
     private readonly repo: D1Repository,
@@ -127,7 +109,7 @@ export class PollScheduler implements Poller {
   ) {}
 
   /** Run one full cycle. Never throws: per-company failures are isolated. */
-  async runCycle(now: string, opts?: { shard?: number; trigger?: string }): Promise<CycleSummary> {
+  async runCycle(now: string, opts?: RunCycleOptions): Promise<CycleSummary> {
     const startedAt = Date.now();
     // Heartbeat baseline: capture the PREVIOUS cycle's finish before this
     // cycle writes its own metrics row, so staleness is measured against the
@@ -182,8 +164,28 @@ export class PollScheduler implements Poller {
     // queue when drained), retries stop when the pool is empty, and
     // enrichment is additionally capped at MAX_DETAIL_ENRICH_PER_INVOCATION
     // so a first-poll burst on a huge board cannot starve delivery.
-    const budget = FetchBudget.afterListFetches(due.length);
-    const outcomes = await mapWithConcurrency(due, CONCURRENCY_LIMIT, (company) =>
+    //
+    // Audit 2026-08-22 V5a: budgetPool lets /api/tick share ONE allowance
+    // across all shards of a sweep. The first cycle plans its due-list into
+    // the shared pool; drained cycles skip cleanly (their companies stay due
+    // for the next trigger) instead of mass-failing with unbacked-off
+    // network errors past the platform cap. The caller passes the total
+    // invocation pool; this cycle's planned fetches are min(due, remaining).
+    let budget: FetchBudget;
+    let polled: CompanyConfig[];
+    if (opts?.budgetPool !== undefined) {
+      // Shared invocation pool: plan at most (pool - margin) list fetches
+      // this cycle; the rest stay due for the next trigger instead of
+      // mass-failing past the platform cap.
+      const planned = Math.min(due.length, Math.max(0, opts.budgetPool - 2));
+      polled = due.slice(0, planned);
+      budget = FetchBudget.afterListFetches(polled.length);
+      skippedInterval += due.length - planned;
+    } else {
+      polled = due;
+      budget = FetchBudget.afterListFetches(due.length);
+    }
+    const outcomes = await mapWithConcurrency(polled, CONCURRENCY_LIMIT, (company) =>
       this.poller.pollCompany(company, now, { budget }),
     );
 
@@ -227,6 +229,17 @@ export class PollScheduler implements Poller {
     // deliver normally. The dashboard/EDN reads system_events for the ops
     // view, and the structured log keeps the observability trail.
     const status = priorStatus;
+
+    // Audit 2026-08-22 W7: bounded retention. Runs on every cron cycle;
+    // indexed deletes that no-op when nothing is past the cutoffs. Never
+    // blocks the cycle result: failures are logged and swallowed.
+    try {
+      await this.repo.pruneOldData(now);
+    } catch (err) {
+      log.warn("retention.failed", {
+        error: err instanceof Error ? err.name : "unknown",
+      });
+    }
     if (status.lastPollAt) {
       const ageMs = Date.parse(now) - Date.parse(status.lastPollAt);
       const open = await this.repo.getOpenSystemEvent("scheduler-stale");

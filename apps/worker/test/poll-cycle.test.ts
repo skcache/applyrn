@@ -976,10 +976,11 @@ describe("bounded notification retry", () => {
 
     // Retry cycle: Telegram still down. The failed attempt must be recorded
     // (error_code), not swallowed, so /api/metrics and the soak checker can
-    // see delivery failures.
-    await env.DB.exec(
-      "UPDATE notifications SET attempted_at = '2026-08-01T00:00:00Z' WHERE delivered = 0",
-    );
+    // see delivery failures. Age past RETRY_MIN_INTERVAL_MS (5 min) but keep
+    // under RETRY_MAX_AGE_MS (24h): a fixed historical date would tombstone
+    // as 'expired' (audit 2026-08-22 V6) instead of retrying.
+    const aged = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await env.DB.exec(`UPDATE notifications SET attempted_at = '${aged}' WHERE delivered = 0`);
     stubTelegram({ ok: false, status: 500 });
     await pollAll();
     const notifs = await rows("notifications", "1=1");
