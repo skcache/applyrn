@@ -741,6 +741,11 @@ export function App() {
                           )}
                         </div>
                         <div className="flex items-center gap-6">
+                          {a.deadlineAt && (
+                            <span className="mono text-xs text-[var(--accent)]" title="OA deadline">
+                              ⏰ {pdt(a.deadlineAt)}
+                            </span>
+                          )}
                           <span className="mono text-xs text-[var(--muted-foreground)]">
                             {pdt(a.updatedAt)}
                           </span>

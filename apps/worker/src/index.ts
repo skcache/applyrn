@@ -13,6 +13,7 @@ import { PollService, SUBREQUEST_LIMIT_PER_INVOCATION, type WorkerEnv } from "./
 import { PollScheduler } from "./scheduler.js";
 import { log } from "./logger.js";
 import { pollGmail } from "./gmail.js";
+import { sweepDeadlines } from "./deadline-sweep.js";
 
 /**
  * ApplyRN Worker: cron-driven poll cycle + minimal HTTP API.
@@ -117,13 +118,23 @@ export default {
         GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
       };
       ctx.waitUntil(
-        pollGmail(gmailEnv, repo, new Date().toISOString()).then((outcome) => {
-          if (outcome.ok) {
+        pollGmail(gmailEnv, repo, new Date().toISOString(), makeTelegramNotifier(env))
+          .then(async (outcome) => {
+            if (!outcome.ok) return;
             log.info(
-              `gmail poll: fetched=${outcome.fetched} stored=${outcome.stored} skipped=${outcome.skipped}`,
+              `gmail poll: fetched=${outcome.fetched} stored=${outcome.stored} skipped=${outcome.skipped} promoted=${outcome.promoted.length} newApps=${outcome.createdApplications}`,
             );
-          }
-        }),
+            // V3 §5: remind about OA deadlines closing within 48h.
+            const sweep = await sweepDeadlines(
+              repo,
+              new Date().toISOString(),
+              makeTelegramNotifier(env),
+            );
+            if (sweep.reminded > 0) log.info(`deadline sweep: reminded=${sweep.reminded}`);
+          })
+          .catch((err) => {
+            log.warn(`gmail poll crashed: ${err instanceof Error ? err.message : err}`);
+          }),
       );
     }
   },
@@ -413,7 +424,10 @@ export default {
     // V3 §2: applications funnel (new-shape table).
     if (request.method === "GET" && url.pathname === "/api/outcomes") {
       if (!(await isAuthorized(request, env))) return unauthorized();
-      const apps = await repo.listApplications();
+      const apps = (await repo.listApplications()).map((a) => ({
+        ...a,
+        deadlineAt: a.deadline_at,
+      }));
       return Response.json({ applications: apps }, { headers: JSON_HEADERS });
     }
 
@@ -456,6 +470,9 @@ export default {
         new Date().toISOString(),
         makeTelegramNotifier(env),
       );
+      if (outcome.ok && outcome.promoted.length > 0) {
+        await sweepDeadlines(repo, new Date().toISOString(), makeTelegramNotifier(env));
+      }
       return Response.json({ outcome }, { status: outcome.ok ? 200 : 502, headers: JSON_HEADERS });
     }
 

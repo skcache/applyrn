@@ -410,11 +410,18 @@ export class D1Repository {
   }
 
   async listApplications(): Promise<
-    { id: number; company: string; role: string | null; status: string; updated_at: string }[]
+    {
+      id: number;
+      company: string;
+      role: string | null;
+      status: string;
+      updated_at: string;
+      deadline_at: string | null;
+    }[]
   > {
     const { results } = await this.db
       .prepare(
-        "SELECT id, company, role, status, updated_at FROM applications ORDER BY updated_at DESC LIMIT 200",
+        "SELECT id, company, role, status, updated_at, deadline_at FROM applications ORDER BY updated_at DESC LIMIT 200",
       )
       .all<{
         id: number;
@@ -422,6 +429,7 @@ export class D1Repository {
         role: string | null;
         status: string;
         updated_at: string;
+        deadline_at: string | null;
       }>();
     return results;
   }
@@ -501,6 +509,60 @@ export class D1Repository {
         updated_at: string;
       }>();
     return results;
+  }
+
+  async setApplicationDeadline(
+    applicationId: number,
+    deadlineAt: string | null,
+    source: string | null,
+  ): Promise<void> {
+    await this.db
+      .prepare("UPDATE applications SET deadline_at = ?, updated_at = ? WHERE id = ?")
+      .bind(deadlineAt, new Date().toISOString(), applicationId)
+      .run();
+    if (deadlineAt) {
+      await this.db
+        .prepare(
+          "UPDATE application_events SET deadline_source = ? WHERE application_id = ? AND event_class = 'assessment_invite' AND deadline_source IS NULL",
+        )
+        .bind(source, applicationId)
+        .run();
+    }
+  }
+
+  /** Applications with a deadline inside the window, not yet reminded. */
+  async listApplicationsWithUpcomingDeadlines(
+    nowIso: string,
+    windowHours: number,
+  ): Promise<
+    { id: number; company: string; role: string | null; status: string; deadline_at: string }[]
+  > {
+    const until = new Date(Date.parse(nowIso) + windowHours * 3600_000).toISOString();
+    const { results } = await this.db
+      .prepare(
+        `SELECT id, company, role, status, deadline_at FROM applications
+         WHERE deadline_at IS NOT NULL
+           AND deadline_at > ?
+           AND deadline_at <= ?
+           AND status IN ('OA','APPLIED')
+           AND deadline_reminded_at IS NULL`,
+      )
+      .bind(nowIso, until)
+      .all<{
+        id: number;
+        company: string;
+        role: string | null;
+        status: string;
+        deadline_at: string;
+      }>();
+    return results;
+  }
+
+  async markDeadlineReminded(applicationId: number, remindedAt: string): Promise<void> {
+    await this.db
+      .prepare("UPDATE applications SET deadline_reminded_at = ? WHERE id = ?")
+      .bind(remindedAt, applicationId)
+      .run();
   }
 
   async getApplicationStatus(id: number): Promise<string | null> {

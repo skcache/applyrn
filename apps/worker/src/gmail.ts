@@ -12,6 +12,7 @@
 import { log } from "./logger.js";
 import { matchEmailToApplication, senderDomain, type LinkCandidate } from "./matcher.js";
 import { planTransition, EVENT_TO_STATUS, type AppStatus } from "./lifecycle.js";
+import { extractDeadline } from "./deadline.js";
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -122,6 +123,18 @@ export interface GmailRepo {
   }): Promise<boolean>; // true = newly inserted (false = idempotent skip)
   getLastGmailHistoryId(): Promise<string | null>;
   saveGmailHistoryId(id: string): Promise<void>;
+  setApplicationDeadline(
+    applicationId: number,
+    deadlineAt: string | null,
+    source: string | null,
+  ): Promise<void>;
+  listApplicationsWithUpcomingDeadlines(
+    nowIso: string,
+    windowHours: number,
+  ): Promise<
+    { id: number; company: string; role: string | null; status: string; deadline_at: string }[]
+  >;
+  markDeadlineReminded(applicationId: number, remindedAt: string): Promise<void>;
   findApplicationByDomain(
     domain: string,
   ): Promise<{ id: number; company: string; role: string | null } | null>;
@@ -475,6 +488,10 @@ export async function pollGmail(
             now,
           });
           outcome.createdApplications++;
+          if (toStatus === "OA" && cls.eventClass === "assessment_invite") {
+            const dl = extractDeadline(parts.subject, parts.snippet, now);
+            await repo.setApplicationDeadline(newId, dl.deadlineAt, dl.source);
+          }
           continue;
         }
         // Tier-2 hit: promote that application.
@@ -497,6 +514,10 @@ export async function pollGmail(
             from: current2,
             to: plan2.to,
           });
+          if (cls.eventClass === "assessment_invite") {
+            const dl = extractDeadline(parts.subject, parts.snippet, now);
+            await repo.setApplicationDeadline(link.applicationId, dl.deadlineAt, dl.source);
+          }
         }
         continue;
       }
@@ -521,6 +542,10 @@ export async function pollGmail(
           from: current,
           to: plan.to,
         });
+        if (cls.eventClass === "assessment_invite") {
+          const dl = extractDeadline(parts.subject, parts.snippet, now);
+          await repo.setApplicationDeadline(domainHit.id, dl.deadlineAt, dl.source);
+        }
       }
     }
 

@@ -142,6 +142,7 @@ export type OutcomeView = {
   role: string | null;
   status: string;
   updatedAt: string;
+  deadlineAt?: string | null;
 };
 
 export const OUTCOME_STATUSES = [
