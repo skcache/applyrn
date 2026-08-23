@@ -511,6 +511,7 @@ export function App() {
   const status = useData(() => api.status(), [authed]);
   const metrics = useData(() => api.metrics(), [authed]);
   const applications = useData(() => api.applications(), [authed, view === "applications"]);
+  const outcomes = useData(() => api.outcomes(), [authed, view === "applications"]);
 
   const setStatus = async (jobId: string, s: ApplicationStatus) => {
     try {
@@ -629,6 +630,32 @@ export function App() {
         {view === "applications" && (
           <main className="flex-1 py-20">
             <h2 className="page-title">Applications</h2>
+            {/* V3 §2: auto-tracked outcomes (email-driven). */}
+            {outcomes.data && outcomes.data.applications.length > 0 && (
+              <section className="mb-16">
+                <h3 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)] mb-4">
+                  Auto-tracked from email
+                </h3>
+                <div className="border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
+                  {outcomes.data.applications.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <span className="font-medium">{a.company}</span>
+                        {a.role && (
+                          <span className="text-[var(--muted-foreground)]"> — {a.role}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <span className="mono text-xs text-[var(--muted-foreground)]">
+                          {pdt(a.updatedAt)}
+                        </span>
+                        <span className="mono status-text">{a.status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}{" "}
             <p className="page-intro">Everything I have touched, from detected to offer.</p>
             <div className="mt-12">
               <Applications

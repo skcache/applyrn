@@ -45,6 +45,31 @@ const TICK_STALENESS_SECONDS = 180;
  * provisioning lives in .github/workflows/deploy.yml. This deliberately
  * prevents an accidental wide-open deploy (previously the default).
  */
+/**
+ * V3 §2: Telegram notifier with severity tiers. Tier-1 (interviews, offers)
+ * is audible; everything else sends silently. Never throws.
+ */
+function makeTelegramNotifier(
+  env: WorkerEnv,
+): (message: string, opts?: { silent?: boolean }) => Promise<void> {
+  return async (message, opts) => {
+    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
+    try {
+      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: env.TELEGRAM_CHAT_ID,
+          text: message,
+          disable_notification: opts?.silent === true,
+        }),
+      });
+    } catch {
+      // notification failures are non-fatal by design
+    }
+  };
+}
+
 async function isAuthorized(request: Request, env: WorkerEnv): Promise<boolean> {
   const token = env.DASHBOARD_TOKEN;
   if (!token) return false;
@@ -314,6 +339,13 @@ export default {
       return Response.json({ outcome }, { headers: JSON_HEADERS });
     }
 
+    // V3 §2: applications funnel (new-shape table).
+    if (request.method === "GET" && url.pathname === "/api/outcomes") {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const apps = await repo.listApplications();
+      return Response.json({ applications: apps }, { headers: JSON_HEADERS });
+    }
+
     // V3 §1: store the Gmail refresh token (called once by applyrn-auth).
     if (request.method === "POST" && url.pathname === "/api/gmail/token") {
       if (!(await isAuthorized(request, env))) return unauthorized();
@@ -351,6 +383,7 @@ export default {
         { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET },
         repo,
         new Date().toISOString(),
+        makeTelegramNotifier(env),
       );
       return Response.json({ outcome }, { status: outcome.ok ? 200 : 502, headers: JSON_HEADERS });
     }

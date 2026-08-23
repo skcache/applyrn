@@ -10,6 +10,8 @@
  */
 
 import { log } from "./logger.js";
+import { matchEmailToApplication, senderDomain, type LinkCandidate } from "./matcher.js";
+import { planTransition, EVENT_TO_STATUS, type AppStatus } from "./lifecycle.js";
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -120,6 +122,29 @@ export interface GmailRepo {
   }): Promise<boolean>; // true = newly inserted (false = idempotent skip)
   getLastGmailHistoryId(): Promise<string | null>;
   saveGmailHistoryId(id: string): Promise<void>;
+  findApplicationByDomain(
+    domain: string,
+  ): Promise<{ id: number; company: string; role: string | null } | null>;
+  listActiveApplications(): Promise<{ id: number; company: string; role: string | null }[]>;
+  createApplication(input: {
+    company: string;
+    role?: string;
+    source: string;
+    companyDomain?: string;
+    applyrnJobId?: string;
+    status?: string;
+    now: string;
+  }): Promise<number>;
+  getApplicationStatus(id: number): Promise<string | null>;
+  recordApplicationEvent(input: {
+    applicationId: number;
+    eventClass: string;
+    emailEventId?: number | null;
+    fromStatus: string;
+    toStatus: string;
+    occurredAt: string;
+    now: string;
+  }): Promise<boolean>;
 }
 
 export class GmailError extends Error {
@@ -185,8 +210,42 @@ export type GmailPollOutcome = {
   fetched: number;
   stored: number;
   skipped: number;
+  promoted: { applicationId: number; eventClass: string; from: string; to: AppStatus }[];
+  createdApplications: number;
   errorCode?: string;
 };
+
+/** Company name guess for a new application row (best-effort, deterministic). */
+function companyFromEvent(
+  fromEmail: string | null,
+  domain: string | null,
+  _subject: string,
+): string {
+  // Prefer the readable part of the From header ("Acme Careers <...>").
+  // Fallback: second-level domain label capitalized.
+  if (fromEmail) {
+    const m = fromEmail.match(/^"?([^"<]+?)"?\s*</);
+    const readable = m?.[1]?.trim();
+    if (readable) {
+      return readable
+        .replace(
+          /\s+(careers|jobs|recruit(?:ing|ment)?|talent|hiring|no.?reply|notifications?)$/i,
+          "",
+        )
+        .trim();
+    }
+    const local = fromEmail.split("@")[0] ?? "";
+    if (local)
+      return (
+        local
+          .replace(/[._-]+/g, " ")
+          .replace(/(?:^|[. _-])(?:no|reply|noreply)(?:[. _-]|$)/gi, " ")
+          .trim() ||
+        (domain ?? "unknown")
+      );
+  }
+  return domain ?? "unknown";
+}
 
 function gmailDateDaysAgo(days: number): string {
   const d = new Date(Date.now() - days * 86_400_000);
@@ -269,12 +328,62 @@ export function parseFrom(fromHeader: string | null): {
 }
 
 /** Run one poll cycle. Never throws; errors land in the outcome. */
+export type GmailNotifyHook = (message: string, opts?: { silent?: boolean }) => Promise<void>;
+
+/** Severity tiers per event class (anti-fatigue synthesis, see docs/v3_outcomes.md §2). */
+export const NOTIFY_TIERS: Record<string, { silent: boolean; priority: 1 | 2 | 3 }> = {
+  interview_invite: { silent: false, priority: 1 },
+  offer: { silent: false, priority: 1 },
+  rejection: { silent: true, priority: 2 },
+  application_confirmation: { silent: true, priority: 3 }, // digest candidate
+  assessment_invite: { silent: true, priority: 3 },
+};
+
+export async function notifyPromotions(
+  promoted: GmailPollOutcome["promoted"],
+  created: number,
+  repo: GmailRepo,
+  notify: GmailNotifyHook,
+): Promise<void> {
+  for (const pr of promoted) {
+    const tier = NOTIFY_TIERS[pr.eventClass] ?? { silent: true, priority: 3 };
+    // Fetch company for a readable message.
+    const status = await repo.getApplicationStatus(pr.applicationId);
+    void status;
+    const msg =
+      `${pr.eventClass === "interview_invite" ? "🎤" : pr.eventClass === "offer" ? "🎉" : "📧"} ` +
+      `Application update: ${pr.eventClass.replace(/_/g, " ")} (${pr.from} → ${pr.to})`;
+    try {
+      await notify(msg, { silent: tier.silent });
+    } catch {
+      // notification failure must never break the poll
+    }
+  }
+  if (created > 0) {
+    try {
+      await notify(`📬 ${created} new application${created > 1 ? "s" : ""} detected from email.`, {
+        silent: true,
+      });
+    } catch {
+      // notification failures are non-fatal by design
+    }
+  }
+}
+
 export async function pollGmail(
   env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string },
   repo: GmailRepo,
   now: string,
+  notify?: GmailNotifyHook,
 ): Promise<GmailPollOutcome> {
-  const outcome: GmailPollOutcome = { ok: false, fetched: 0, stored: 0, skipped: 0 };
+  const outcome: GmailPollOutcome = {
+    ok: false,
+    fetched: 0,
+    stored: 0,
+    skipped: 0,
+    promoted: [],
+    createdApplications: 0,
+  };
   let accessToken: string;
   try {
     accessToken = await getAccessToken(env, repo);
@@ -330,10 +439,96 @@ export async function pollGmail(
       });
       if (inserted) outcome.stored++;
       else outcome.skipped++;
+
+      // V3 §2: promote applications. Only classified events with a status
+      // mapping participate; unclassified mail never touches the funnel.
+      const toStatus = EVENT_TO_STATUS[cls.eventClass];
+      if (!inserted || !toStatus) continue;
+
+      const senderDom = senderDomain(email);
+      const domainHit = senderDom ? await repo.findApplicationByDomain(senderDom) : null;
+      if (!domainHit) {
+        // Tier-2 candidates by company-token overlap against subject.
+        const candidates = await repo.listActiveApplications();
+        const link = matchEmailToApplication(
+          senderDom,
+          parts.subject,
+          null,
+          candidates as LinkCandidate[],
+        );
+        if (!link.linked) {
+          // New application row from email evidence alone.
+          const newId = await repo.createApplication({
+            company: companyFromEvent(email, domain, parts.subject),
+            source: "email",
+            companyDomain: senderDom ?? undefined,
+            status: toStatus,
+            now,
+          });
+          await repo.recordApplicationEvent({
+            applicationId: newId,
+            eventClass: cls.eventClass,
+            emailEventId: undefined,
+            fromStatus: "DETECTED",
+            toStatus,
+            occurredAt: receivedAt,
+            now,
+          });
+          outcome.createdApplications++;
+          continue;
+        }
+        // Tier-2 hit: promote that application.
+        const current2 = await repo.getApplicationStatus(link.applicationId);
+        if (!current2) continue;
+        const plan2 = planTransition(current2 as AppStatus, cls.eventClass);
+        if (plan2.action === "promote") {
+          await repo.recordApplicationEvent({
+            applicationId: link.applicationId,
+            eventClass: cls.eventClass,
+            emailEventId: undefined,
+            fromStatus: current2,
+            toStatus: plan2.to,
+            occurredAt: receivedAt,
+            now,
+          });
+          outcome.promoted.push({
+            applicationId: link.applicationId,
+            eventClass: cls.eventClass,
+            from: current2,
+            to: plan2.to,
+          });
+        }
+        continue;
+      }
+
+      // Tier-1 hit (sender domain matches an existing application).
+      const current = await repo.getApplicationStatus(domainHit.id);
+      if (!current) continue;
+      const plan = planTransition(current as AppStatus, cls.eventClass);
+      if (plan.action === "promote") {
+        await repo.recordApplicationEvent({
+          applicationId: domainHit.id,
+          eventClass: cls.eventClass,
+          emailEventId: undefined,
+          fromStatus: current,
+          toStatus: plan.to,
+          occurredAt: receivedAt,
+          now,
+        });
+        outcome.promoted.push({
+          applicationId: domainHit.id,
+          eventClass: cls.eventClass,
+          from: current,
+          to: plan.to,
+        });
+      }
     }
 
     if (listed.historyId) await repo.saveGmailHistoryId(String(listed.historyId));
     outcome.ok = true;
+    if (notify && (outcome.promoted.length > 0 || outcome.createdApplications > 0)) {
+      await notifyPromotions(outcome.promoted, outcome.createdApplications, repo, notify);
+    }
     return outcome;
   } catch (err: any) {
     outcome.errorCode = err instanceof GmailError ? err.code : "poll_failed";

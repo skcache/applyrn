@@ -260,7 +260,7 @@ export class D1Repository {
         `SELECT j.*, c.name AS company_name, a.status AS application_status, a.applied_at AS application_applied_at
          FROM jobs j
          JOIN companies c ON c.id = j.company_id
-         LEFT JOIN applications a ON a.job_id = j.id
+         LEFT JOIN applications_v1_legacy a ON a.job_id = j.id
          ORDER BY j.first_seen_at DESC
          LIMIT ?`,
       )
@@ -275,7 +275,7 @@ export class D1Repository {
         `SELECT j.*, c.name AS company_name, a.status AS application_status, a.applied_at AS application_applied_at
          FROM jobs j
          JOIN companies c ON c.id = j.company_id
-         LEFT JOIN applications a ON a.job_id = j.id
+         LEFT JOIN applications_v1_legacy a ON a.job_id = j.id
          WHERE j.id = ?`,
       )
       .bind(id)
@@ -354,6 +354,119 @@ export class D1Repository {
       )
       .bind(refreshToken, scope, new Date().toISOString())
       .run();
+  }
+
+  // --- V3 §2: applications + lifecycle events ---
+
+  async findApplicationByDomain(
+    domain: string,
+  ): Promise<{ id: number; company: string; role: string | null } | null> {
+    return (
+      (await this.db
+        .prepare(
+          "SELECT id, company, role FROM applications WHERE company_domain = ? AND status NOT IN ('REJECTED','WITHDRAWN') ORDER BY updated_at DESC LIMIT 1",
+        )
+        .bind(domain)
+        .first<{ id: number; company: string; role: string | null }>()) ?? null
+    );
+  }
+
+  async listActiveApplications(): Promise<{ id: number; company: string; role: string | null }[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT id, company, role FROM applications WHERE status NOT IN ('REJECTED','WITHDRAWN')",
+      )
+      .all<{ id: number; company: string; role: string | null }>();
+    return results;
+  }
+
+  async createApplication(input: {
+    company: string;
+    role?: string;
+    source: string;
+    companyDomain?: string;
+    applyrnJobId?: string;
+    status?: string;
+    now: string;
+  }): Promise<number> {
+    const res = await this.db
+      .prepare(
+        `INSERT INTO applications (company, role, source, company_domain, applyrn_job_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        input.company,
+        input.role ?? null,
+        input.source,
+        input.companyDomain ?? null,
+        input.applyrnJobId ?? null,
+        input.status ?? "APPLIED",
+        input.now,
+        input.now,
+      )
+      .run();
+    const meta = res.meta as unknown as { last_row_id?: number };
+    return meta?.last_row_id ?? 0;
+  }
+
+  async listApplications(): Promise<
+    { id: number; company: string; role: string | null; status: string; updated_at: string }[]
+  > {
+    const { results } = await this.db
+      .prepare(
+        "SELECT id, company, role, status, updated_at FROM applications ORDER BY updated_at DESC LIMIT 200",
+      )
+      .all<{
+        id: number;
+        company: string;
+        role: string | null;
+        status: string;
+        updated_at: string;
+      }>();
+    return results;
+  }
+
+  async getApplicationStatus(id: number): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT status FROM applications WHERE id = ?")
+      .bind(id)
+      .first<{ status: string }>();
+    return row?.status ?? null;
+  }
+
+  /**
+   * Append a lifecycle event and promote the cached status in the same call.
+   * Returns false when the event was a no-op (duplicate/illegal).
+   */
+  async recordApplicationEvent(input: {
+    applicationId: number;
+    eventClass: string;
+    emailEventId?: number | null;
+    fromStatus: string;
+    toStatus: string;
+    occurredAt: string;
+    now: string;
+  }): Promise<boolean> {
+    await this.db
+      .prepare(
+        `INSERT INTO application_events (application_id, event_class, email_event_id, from_status, to_status, occurred_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        input.applicationId,
+        input.eventClass,
+        input.emailEventId ?? null,
+        input.fromStatus,
+        input.toStatus,
+        input.occurredAt,
+        input.now,
+      )
+      .run();
+    await this.db
+      .prepare("UPDATE applications SET status = ?, updated_at = ? WHERE id = ?")
+      .bind(input.toStatus, input.now, input.applicationId)
+      .run();
+    return true;
   }
 
   async getLastGmailHistoryId(): Promise<string | null> {
@@ -570,7 +683,7 @@ export class D1Repository {
       .prepare(
         `SELECT a.*, j.title AS job_title, j.detected_at AS job_detected_at,
                 j.provider AS job_provider, c.name AS company_name
-         FROM applications a
+         FROM applications_v1_legacy a
          JOIN jobs j ON j.id = a.job_id
          JOIN companies c ON c.id = j.company_id
          ORDER BY a.applied_at IS NULL, a.applied_at DESC, j.detected_at DESC`,
@@ -993,7 +1106,7 @@ export class D1Repository {
 
   async getApplication(jobId: string): Promise<ApplicationRecord | null> {
     const row = await this.db
-      .prepare("SELECT * FROM applications WHERE job_id = ?")
+      .prepare("SELECT * FROM applications_v1_legacy WHERE job_id = ?")
       .bind(jobId)
       .first();
     if (!row) return null;
@@ -1015,7 +1128,7 @@ export class D1Repository {
   async upsertApplication(app: ApplicationRecord): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO applications (job_id, status, saved_at, applied_at, oa_at, interview_at, final_at, offer_at, rejected_at, ghosted_at, notes)
+        `INSERT INTO applications_v1_legacy (job_id, status, saved_at, applied_at, oa_at, interview_at, final_at, offer_at, rejected_at, ghosted_at, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(job_id) DO UPDATE SET
            status = excluded.status,

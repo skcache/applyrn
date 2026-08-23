@@ -135,6 +135,26 @@ export type ApplicationView = {
   companyName: string;
 };
 
+/** V3 §2 outcome-tracking application (new-shape table). */
+export type OutcomeView = {
+  id: number;
+  company: string;
+  role: string | null;
+  status: string;
+  updatedAt: string;
+};
+
+export const OUTCOME_STATUSES = [
+  "APPLIED",
+  "OA",
+  "INTERVIEW",
+  "OFFER",
+  "REJECTED",
+  "WITHDRAWN",
+] as const;
+
+export type OutcomeStatus = (typeof OUTCOME_STATUSES)[number];
+
 export const APPLICATION_STATUSES = [
   "DETECTED",
   "SAVED",
@@ -156,6 +176,7 @@ export const api = {
   status: () => request<{ status: SystemStatus }>("/status"),
   metrics: () => request<{ metrics: ObservabilityMetrics }>("/metrics"),
   applications: () => request<{ applications: ApplicationView[] }>("/applications"),
+  outcomes: () => request<{ applications: OutcomeView[] }>("/outcomes"),
   setApplicationStatus: (jobId: string, status: ApplicationStatus) =>
     request<{ application: { status: string; appliedAt?: string } }>(
       `/jobs/${encodeURIComponent(jobId)}/application`,
