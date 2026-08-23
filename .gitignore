@@ -44,3 +44,4 @@ coverage/
 .idea/
 .vscode/
 soak-check-report.json
+apps/dashboard/tsconfig.tsbuildinfo
