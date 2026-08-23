@@ -52,6 +52,31 @@ function sqlFor(companies) {
   return lines.join(";\n") + ";";
 }
 
+const PROVIDERS = new Set(["greenhouse", "lever", "ashby", "smartrecruiters", "workday", "oracle"]);
+
+/**
+ * Sec-audit run-2 hardening: the seeder is the only writer to `companies`,
+ * so it is where a poisoned watchlist file gets stopped. board_key becomes
+ * fetch URLs inside adapters (workday derives an https origin from it), and
+ * provider selects the adapter — anything outside this shape is rejected
+ * before SQL is generated.
+ */
+function validateCompany(c, idx) {
+  const fail = (msg) => {
+    console.error(`company[${idx}] (${c.id ?? "?"}): ${msg}`);
+    process.exit(1);
+  };
+  if (!c || typeof c !== "object") fail("not an object");
+  if (!/^s?[a-z0-9][a-z0-9-]*$/.test(String(c.id))) fail(`bad id: ${c.id}`);
+  if (!PROVIDERS.has(String(c.provider))) fail(`unknown provider: ${c.provider}`);
+  if (!/^[a-zA-Z0-9._:-]+$/.test(String(c.boardKey ?? ""))) {
+    fail(`boardKey has unexpected characters: ${c.boardKey}`);
+  }
+  if (c.careersUrl && !/^https?:\/\//i.test(String(c.careersUrl))) {
+    fail(`careersUrl must be http(s): ${c.careersUrl}`);
+  }
+}
+
 const argv = process.argv.slice(2);
 const remote = argv.includes("--remote");
 const path = pickWatchlist(argv);
@@ -67,6 +92,7 @@ if (!Array.isArray(companies)) {
   console.error(`watchlist ${path} must be a JSON array of companies`);
   process.exit(1);
 }
+companies.forEach(validateCompany);
 
 const sql = sqlFor(companies);
 const target = remote ? "remote D1" : "local D1";
