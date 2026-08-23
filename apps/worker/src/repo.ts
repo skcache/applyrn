@@ -333,6 +333,85 @@ export class D1Repository {
   }
 
   /** System status: enabled company count, cadence, last successful poll. */
+  // --- V3 §1: Gmail outcome tracking ---
+
+  async getGmailRefreshToken(): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT refresh_token FROM oauth_tokens WHERE provider = 'gmail'")
+      .first<{ refresh_token: string }>();
+    return row?.refresh_token ?? null;
+  }
+
+  async saveGmailRefreshToken(refreshToken: string, scope: string): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO oauth_tokens (provider, refresh_token, scope, updated_at)
+         VALUES ('gmail', ?, ?, ?)
+         ON CONFLICT(provider) DO UPDATE SET
+           refresh_token = excluded.refresh_token,
+           scope = excluded.scope,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(refreshToken, scope, new Date().toISOString())
+      .run();
+  }
+
+  async getLastGmailHistoryId(): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT value FROM system_kv WHERE key = 'gmail_history_id'")
+      .first<{
+        value: string;
+      }>();
+    return row?.value ?? null;
+  }
+
+  async saveGmailHistoryId(id: string): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO system_kv (key, value) VALUES ('gmail_history_id', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .bind(id)
+      .run();
+  }
+
+  /** Idempotent insert; returns true when the row is NEW (false = seen before). */
+  async insertEmailEvent(ev: {
+    gmailId: string;
+    threadId?: string;
+    fromEmail?: string;
+    fromDomain?: string;
+    subjectNorm?: string;
+    snippet?: string;
+    eventClass: string;
+    confidence: number;
+    receivedAt: string;
+    now: string;
+  }): Promise<boolean> {
+    const res = await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO email_events
+           (gmail_id, thread_id, from_email, from_domain, subject_norm,
+            snippet, event_class, confidence, received_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        ev.gmailId,
+        ev.threadId ?? null,
+        ev.fromEmail ?? null,
+        ev.fromDomain ?? null,
+        ev.subjectNorm ?? null,
+        ev.snippet ?? null,
+        ev.eventClass,
+        ev.confidence,
+        ev.receivedAt,
+        ev.now,
+      )
+      .run();
+    const meta = res.meta as unknown as { changes?: number };
+    return (meta?.changes ?? 0) > 0;
+  }
+
   async getSystemStatus(): Promise<{
     companyCount: number;
     cadenceSeconds: number;

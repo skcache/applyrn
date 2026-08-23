@@ -31,6 +31,9 @@ export type WorkerEnv = {
   TELEGRAM_CHAT_ID: string;
   /** Optional shared token gating the HTTP API (PRD 14 simple access layer). */
   DASHBOARD_TOKEN?: string;
+  /** V3 §1 Gmail outcome tracking — set via `wrangler secret put`. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
 };
 
 export type PollOutcome = {

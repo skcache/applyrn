@@ -12,6 +12,7 @@ import { D1Repository } from "./repo.js";
 import { PollService, SUBREQUEST_LIMIT_PER_INVOCATION, type WorkerEnv } from "./poll.js";
 import { PollScheduler } from "./scheduler.js";
 import { log } from "./logger.js";
+import { pollGmail } from "./gmail.js";
 
 /**
  * ApplyRN Worker: cron-driven poll cycle + minimal HTTP API.
@@ -81,6 +82,25 @@ export default {
     ctx: ExecutionContext,
   ): Promise<void> {
     ctx.waitUntil(buildScheduler(env).runCycle(new Date().toISOString(), { trigger: "cf-cron" }));
+    // V3 §1: Gmail outcome poll rides the same cron, phase-gated to ~every
+    // 10 minutes. Skipped silently when GOOGLE_CLIENT_ID is not configured
+    // (feature flag by absence of secrets — nothing else to flip).
+    if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && new Date().getUTCMinutes() % 10 === 0) {
+      const repo = new D1Repository(env.DB);
+      const gmailEnv = {
+        GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
+      };
+      ctx.waitUntil(
+        pollGmail(gmailEnv, repo, new Date().toISOString()).then((outcome) => {
+          if (outcome.ok) {
+            log.info(
+              `gmail poll: fetched=${outcome.fetched} stored=${outcome.stored} skipped=${outcome.skipped}`,
+            );
+          }
+        }),
+      );
+    }
   },
 
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -292,6 +312,47 @@ export default {
       const service = buildPollService(env);
       const outcome = await service.pollCompany(company, new Date().toISOString());
       return Response.json({ outcome }, { headers: JSON_HEADERS });
+    }
+
+    // V3 §1: store the Gmail refresh token (called once by applyrn-auth).
+    if (request.method === "POST" && url.pathname === "/api/gmail/token") {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const body = (await request.json().catch(() => ({}))) as {
+        refreshToken?: unknown;
+        scope?: unknown;
+      };
+      if (typeof body.refreshToken !== "string" || body.refreshToken.length < 20) {
+        return Response.json(
+          { error: "refreshToken required" },
+          { status: 400, headers: JSON_HEADERS },
+        );
+      }
+      await repo.saveGmailRefreshToken(
+        body.refreshToken,
+        typeof body.scope === "string"
+          ? body.scope
+          : "https://www.googleapis.com/auth/gmail.readonly",
+      );
+      return Response.json({ ok: true }, { headers: JSON_HEADERS });
+    }
+
+    // V3 §1: manual poll trigger (same path the cron uses).
+    if (request.method === "POST" && url.pathname === "/api/gmail/poll") {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+        return Response.json(
+          {
+            error: "Gmail not configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET secrets missing)",
+          },
+          { status: 409, headers: JSON_HEADERS },
+        );
+      }
+      const outcome = await pollGmail(
+        { GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET },
+        repo,
+        new Date().toISOString(),
+      );
+      return Response.json({ outcome }, { status: outcome.ok ? 200 : 502, headers: JSON_HEADERS });
     }
 
     return Response.json({ error: "not found" }, { status: 404, headers: JSON_HEADERS });
