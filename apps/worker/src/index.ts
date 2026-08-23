@@ -339,6 +339,77 @@ export default {
       return Response.json({ outcome }, { headers: JSON_HEADERS });
     }
 
+    // V3 §3: CSV export of all tracked applications.
+    if (request.method === "GET" && url.pathname === "/api/export/applications.csv") {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const rows = await repo.listApplicationsForExport();
+      const esc = (v: string | number | null) => {
+        const s = String(v ?? "");
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const csv =
+        "id,company,role,status,created_at,updated_at\n" +
+        rows
+          .map((r) =>
+            [r.id, esc(r.company), esc(r.role), r.status, r.created_at, r.updated_at].join(","),
+          )
+          .join("\n");
+      return new Response(csv, {
+        headers: {
+          ...JSON_HEADERS,
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="applications.csv"',
+        },
+      });
+    }
+
+    // V3 §3: manual status correction (writes a correction event).
+    if (request.method === "PUT" && /^\/api\/outcomes\/\d+\/status$/.test(url.pathname)) {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const id = Number(url.pathname.split("/")[3]);
+      const body = (await request.json().catch(() => ({}))) as { status?: unknown };
+      if (typeof body.status !== "string") {
+        return Response.json({ error: "status required" }, { status: 400, headers: JSON_HEADERS });
+      }
+      const current = await repo.getApplicationStatus(id);
+      if (!current) {
+        return Response.json(
+          { error: "application not found" },
+          { status: 404, headers: JSON_HEADERS },
+        );
+      }
+      await repo.correctApplicationStatus({
+        applicationId: id,
+        newStatus: body.status.toUpperCase(),
+        fromStatus: current,
+        now: new Date().toISOString(),
+      });
+      return Response.json(
+        { ok: true, status: body.status.toUpperCase() },
+        { headers: JSON_HEADERS },
+      );
+    }
+
+    // V3 §3: manual add-application (portals that send zero email).
+    if (request.method === "POST" && url.pathname === "/api/outcomes") {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const body = (await request.json().catch(() => ({}))) as {
+        company?: unknown;
+        role?: unknown;
+        status?: unknown;
+      };
+      if (typeof body.company !== "string" || body.company.trim().length === 0) {
+        return Response.json({ error: "company required" }, { status: 400, headers: JSON_HEADERS });
+      }
+      const id = await repo.createManualApplication({
+        company: body.company.trim().slice(0, 120),
+        role: typeof body.role === "string" ? body.role.slice(0, 160) : undefined,
+        status: typeof body.status === "string" ? body.status.toUpperCase() : undefined,
+        now: new Date().toISOString(),
+      });
+      return Response.json({ ok: true, id }, { status: 201, headers: JSON_HEADERS });
+    }
+
     // V3 §2: applications funnel (new-shape table).
     if (request.method === "GET" && url.pathname === "/api/outcomes") {
       if (!(await isAuthorized(request, env))) return unauthorized();

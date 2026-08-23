@@ -177,6 +177,16 @@ export const api = {
   metrics: () => request<{ metrics: ObservabilityMetrics }>("/metrics"),
   applications: () => request<{ applications: ApplicationView[] }>("/applications"),
   outcomes: () => request<{ applications: OutcomeView[] }>("/outcomes"),
+  correctOutcomeStatus: (id: number, status: OutcomeStatus) =>
+    request<{ ok: boolean }>(`/outcomes/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+  addOutcome: (company: string, role: string, status: OutcomeStatus) =>
+    request<{ ok: boolean; id: number }>("/outcomes", {
+      method: "POST",
+      body: JSON.stringify({ company, role, status }),
+    }),
   setApplicationStatus: (jobId: string, status: ApplicationStatus) =>
     request<{ application: { status: string; appliedAt?: string } }>(
       `/jobs/${encodeURIComponent(jobId)}/application`,

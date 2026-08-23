@@ -426,6 +426,83 @@ export class D1Repository {
     return results;
   }
 
+  /**
+   * V3 §3: manual status correction. Writes a correction event (audit trail)
+   * then updates the cached status.
+   */
+  async correctApplicationStatus(input: {
+    applicationId: number;
+    newStatus: string;
+    fromStatus: string;
+    now: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO application_events (application_id, event_class, email_event_id, from_status, to_status, occurred_at, created_at)
+         VALUES (?, 'manual_correction', NULL, ?, ?, ?, ?)`,
+      )
+      .bind(input.applicationId, input.fromStatus, input.newStatus, input.now, input.now)
+      .run();
+    await this.db
+      .prepare("UPDATE applications SET status = ?, updated_at = ? WHERE id = ?")
+      .bind(input.newStatus, input.now, input.applicationId)
+      .run();
+  }
+
+  /** V3 §3: manual add — portals that send zero email still get tracked. */
+  async createManualApplication(input: {
+    company: string;
+    role?: string;
+    status?: string;
+    now: string;
+  }): Promise<number> {
+    const res = await this.db
+      .prepare(
+        `INSERT INTO applications (company, role, source, status, created_at, updated_at)
+         VALUES (?, ?, 'manual', ?, ?, ?)`,
+      )
+      .bind(input.company, input.role ?? null, input.status ?? "APPLIED", input.now, input.now)
+      .run();
+    const meta = res.meta as unknown as { last_row_id?: number };
+    const id = meta?.last_row_id ?? 0;
+    if (id > 0) {
+      await this.db
+        .prepare(
+          `INSERT INTO application_events (application_id, event_class, email_event_id, from_status, to_status, occurred_at, created_at)
+           VALUES (?, 'manual_add', NULL, NULL, ?, ?, ?)`,
+        )
+        .bind(id, input.status ?? "APPLIED", input.now, input.now)
+        .run();
+    }
+    return id;
+  }
+
+  /** V3 §3: CSV export rows (all applications, newest first). */
+  async listApplicationsForExport(): Promise<
+    {
+      id: number;
+      company: string;
+      role: string | null;
+      status: string;
+      created_at: string;
+      updated_at: string;
+    }[]
+  > {
+    const { results } = await this.db
+      .prepare(
+        "SELECT id, company, role, status, created_at, updated_at FROM applications ORDER BY updated_at DESC",
+      )
+      .all<{
+        id: number;
+        company: string;
+        role: string | null;
+        status: string;
+        created_at: string;
+        updated_at: string;
+      }>();
+    return results;
+  }
+
   async getApplicationStatus(id: number): Promise<string | null> {
     const row = await this.db
       .prepare("SELECT status FROM applications WHERE id = ?")
@@ -990,6 +1067,10 @@ export class D1Repository {
     const metricsCutoff = new Date(cutoffMs - 14 * 24 * 60 * 60 * 1000).toISOString();
     const notifCutoff = new Date(cutoffMs - 30 * 24 * 60 * 60 * 1000).toISOString();
     const jobsCutoff = new Date(cutoffMs - 90 * 24 * 60 * 60 * 1000).toISOString();
+    // V3 §3: email snippets are PII — purged at 180d. Headers (from/subject/
+    // class/received_at) are retained indefinitely: ~200 bytes/row and they
+    // are the audit trail for application_events.
+    const snippetCutoff = new Date(cutoffMs - 180 * 24 * 60 * 60 * 1000).toISOString();
     await this.db
       .prepare("DELETE FROM poll_metrics WHERE finished_at < ?")
       .bind(metricsCutoff)
@@ -1005,6 +1086,12 @@ export class D1Repository {
         "DELETE FROM jobs WHERE status = 'inactive' AND confirmed_inactive_at IS NOT NULL AND confirmed_inactive_at < ?",
       )
       .bind(jobsCutoff)
+      .run();
+    await this.db
+      .prepare(
+        "UPDATE email_events SET snippet = NULL WHERE received_at < ? AND snippet IS NOT NULL",
+      )
+      .bind(snippetCutoff)
       .run();
   }
 

@@ -12,7 +12,9 @@ import {
   type ApplicationView,
   type JobView,
   type ObservabilityMetrics,
+  type OutcomeStatus,
   type SourceHealth,
+  OUTCOME_STATUSES,
   type SystemStatus,
 } from "./api";
 
@@ -512,6 +514,31 @@ export function App() {
   const metrics = useData(() => api.metrics(), [authed]);
   const applications = useData(() => api.applications(), [authed, view === "applications"]);
   const outcomes = useData(() => api.outcomes(), [authed, view === "applications"]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addCompany, setAddCompany] = useState("");
+  const [addRole, setAddRole] = useState("");
+
+  const correctOutcome = async (id: number, status: OutcomeStatus) => {
+    try {
+      await api.correctOutcomeStatus(id, status);
+      outcomes.reload();
+    } catch {
+      // silent; next reload shows server truth
+    }
+  };
+
+  const addOutcome = async () => {
+    if (!addCompany.trim()) return;
+    try {
+      await api.addOutcome(addCompany.trim(), addRole.trim(), "APPLIED");
+      setAddCompany("");
+      setAddRole("");
+      setShowAdd(false);
+      outcomes.reload();
+    } catch {
+      // silent; next reload shows server truth
+    }
+  };
 
   const setStatus = async (jobId: string, s: ApplicationStatus) => {
     try {
@@ -633,27 +660,106 @@ export function App() {
             {/* V3 §2: auto-tracked outcomes (email-driven). */}
             {outcomes.data && outcomes.data.applications.length > 0 && (
               <section className="mb-16">
-                <h3 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)] mb-4">
-                  Auto-tracked from email
-                </h3>
-                <div className="border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
-                  {outcomes.data.applications.map((a) => (
-                    <div key={a.id} className="flex items-center justify-between px-4 py-3">
-                      <div>
-                        <span className="font-medium">{a.company}</span>
-                        {a.role && (
-                          <span className="text-[var(--muted-foreground)]"> — {a.role}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <span className="mono text-xs text-[var(--muted-foreground)]">
-                          {pdt(a.updatedAt)}
-                        </span>
-                        <span className="mono status-text">{a.status}</span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                    Auto-tracked from email
+                  </h3>
+                  <div className="flex items-center gap-3">
+                    <a
+                      href={`${import.meta.env.VITE_API_BASE ?? ""}/api/export/applications.csv`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const token = getToken();
+                        if (!token) return;
+                        fetch(`/api/export/applications.csv`, {
+                          headers: { Authorization: `Bearer ${token}` },
+                        })
+                          .then((r) => (r.ok ? r.text() : Promise.reject()))
+                          .then((csv) => {
+                            const blob = new Blob([csv], { type: "text/csv" });
+                            const a = document.createElement("a");
+                            a.href = URL.createObjectURL(blob);
+                            a.download = "applications.csv";
+                            a.click();
+                            URL.revokeObjectURL(a.href);
+                          })
+                          .catch(() => undefined);
+                      }}
+                      className="mono text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                    >
+                      Export CSV ↓
+                    </a>
+                    <button
+                      onClick={() => setShowAdd(!showAdd)}
+                      className="mono text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                    >
+                      {showAdd ? "Cancel" : "+ Add manually"}
+                    </button>
+                  </div>
                 </div>
+                {showAdd && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      addOutcome();
+                    }}
+                    className="flex flex-wrap items-center gap-3 mb-6"
+                  >
+                    <input
+                      value={addCompany}
+                      onChange={(e) => setAddCompany(e.target.value)}
+                      placeholder="Company"
+                      className="status-select px-3 py-2 rounded-md"
+                      required
+                    />
+                    <input
+                      value={addRole}
+                      onChange={(e) => setAddRole(e.target.value)}
+                      placeholder="Role"
+                      className="status-select px-3 py-2 rounded-md"
+                    />
+                    <button
+                      type="submit"
+                      className="mono text-xs px-4 py-2 border border-[var(--border)] rounded-md"
+                    >
+                      Add
+                    </button>
+                  </form>
+                )}
+                {outcomes.data.applications.length === 0 ? (
+                  <p className="text-sm text-[var(--muted-foreground)]">
+                    No applications tracked yet. Link Gmail or add one manually.
+                  </p>
+                ) : (
+                  <div className="border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
+                    {outcomes.data.applications.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between px-4 py-3">
+                        <div>
+                          <span className="font-medium">{a.company}</span>
+                          {a.role && (
+                            <span className="text-[var(--muted-foreground)]"> — {a.role}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <span className="mono text-xs text-[var(--muted-foreground)]">
+                            {pdt(a.updatedAt)}
+                          </span>
+                          <select
+                            value={a.status}
+                            onChange={(e) => correctOutcome(a.id, e.target.value as OutcomeStatus)}
+                            className="status-select mono text-xs"
+                          >
+                            {OUTCOME_STATUSES.map((st) => (
+                              <option key={st} value={st}>
+                                {st}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             )}{" "}
             <p className="page-intro">Everything I have touched, from detected to offer.</p>
