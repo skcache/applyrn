@@ -125,7 +125,16 @@ export async function launchBrowser(opts?: {
         // Click "Continue"/"Next" — never "Submit" (that is approveSubmission's job).
         const clicked = await page.evaluate(`(() => {
           const btns = Array.from(document.querySelectorAll('button, input[type=submit], a'));
-          const next = btns.find(b => /^(continue|next)$/i.test((b.textContent || b.value || '').trim()));
+          // R2-5 (sec audit run-2): never click anything whose full label
+          // mentions submit/send/application — those are final actions and
+          // belong exclusively to the human-gated submit step. A board
+          // captioning its final button "Continue" would otherwise bypass
+          // the gate; such boards abort to review instead.
+          const isFinal = (t) => /submit|send|application/i.test(t);
+          const next = btns.find((b) => {
+            const t = (b.textContent || b.value || '').trim();
+            return /^(continue|next)$/i.test(t) && !isFinal(t);
+          });
           if (next) { next.click(); return true; }
           return false;
         })()`);

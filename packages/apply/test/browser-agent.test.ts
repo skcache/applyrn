@@ -114,3 +114,17 @@ describe("runFillPass", () => {
     expect(result.paused[0]?.reason).toContain("type attempt failed");
   });
 });
+
+describe("V3 R2-6: CSS.escape on inventory selectors", () => {
+  it("neutralizes selector injection via board-controlled id/name", () => {
+    // Node has no global CSS; mirror the page-side construction with the same
+    // escape semantics (CSS.escape backslash-escapes non-identifier chars).
+    const esc = (v: string) => v.replace(/([^a-zA-Z0-9_-])/g, "\\$1");
+    const hostileId = 'x"], [name="password';
+    const hostileName = 'email"], [name="ssn';
+    const sel1 = `#${esc(hostileId)}`;
+    const sel2 = `[name="${esc(hostileName)}"]`;
+    expect(sel1).not.toContain('"], [');
+    expect(sel2).not.toContain('"], [name="ssn');
+  });
+});

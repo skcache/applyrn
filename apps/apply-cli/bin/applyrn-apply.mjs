@@ -11,7 +11,7 @@
  *                                         drive the runner. Ctrl-C to stop.
  *   applyrn-apply status [session-id]     Show session state(s).
  *
- * Environment (.env or env vars):
+ * Environment (export in your shell profile; no .env loader):
  *   APPLYRN_WORKER_URL      e.g. https://applyrn-worker.<account>.workers.dev
  *   APPLYRN_TOKEN           DASHBOARD_TOKEN
  *   TELEGRAM_BOT_TOKEN      bot that sends alerts + receives callbacks
@@ -27,14 +27,16 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const WORKER_URL = process.env.APPLYYRN_WORKER_URL ?? process.env.APPLYRN_WORKER_URL ?? "";
-const TOKEN = process.env.APPLYYRN_TOKEN ?? process.env.APPLYRN_TOKEN ?? "";
+// R2-9: the misspelled APPLYYRN_* variants used to take precedence over the
+// documented names — read ONLY the documented names, in one place.
+const WORKER_URL = process.env.APPLYRN_WORKER_URL ?? "";
+const TOKEN = process.env.APPLYRN_TOKEN ?? "";
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const TG_CHAT = process.env.TELEGRAM_CHAT_ID ?? "";
 const PROFILE_PATH =
-  process.env.APPLYYRN_PROFILE ?? path.join(os.homedir(), ".applyrn", "profile.json");
+  process.env.APPLYRN_PROFILE ?? path.join(os.homedir(), ".applyrn", "profile.json");
 const SESSIONS_DIR = path.join(os.homedir(), ".applyrn", "sessions");
-const RESUME_PATH = process.env.APPLYYRN_RESUME;
+const RESUME_PATH = process.env.APPLYRN_RESUME;
 
 function die(msg) {
   console.error(`error: ${msg}`);
@@ -73,14 +75,45 @@ async function tg(method, body) {
   return res.json();
 }
 
-const sessionPath = (id) => path.join(SESSIONS_DIR, `${id}.json`);
+const sessionPath = (id) => {
+  // R2-2 (sec audit run-2): ids are internally generated `s<base36><n>`; any
+  // other shape must never touch the filesystem (path traversal).
+  if (!/^s[a-z0-9]+$/.test(id)) return null;
+  const p = path.join(SESSIONS_DIR, `${id}.json`);
+  return p.startsWith(SESSIONS_DIR + path.sep) ? p : null;
+};
 async function saveSession(session) {
   mkdirSync(SESSIONS_DIR, { recursive: true });
-  writeFileSync(sessionPath(session.id), JSON.stringify(session, null, 2));
+  writeFileSync(sessionPath(session.id), JSON.stringify(session, null, 2), { mode: 0o600 });
 }
 async function loadSession(id) {
   const p = sessionPath(id);
-  return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
+  if (!p || !existsSync(p)) return null;
+  let s;
+  try {
+    s = JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null; // malformed file is not a session
+  }
+  return isValidSession(s) ? s : null;
+}
+
+/**
+ * R2-2: a loaded session drives browser navigation and form submission —
+ * validate the minimum shape before anything trusts it. applyUrl must be
+ * http(s); file:// and other schemes are rejected.
+ */
+function isValidSession(s) {
+  return (
+    s !== null &&
+    typeof s === "object" &&
+    typeof s.id === "string" &&
+    /^s[a-z0-9]+$/.test(s.id) &&
+    typeof s.jobId === "string" &&
+    typeof s.applyUrl === "string" &&
+    /^https?:\/\//i.test(s.applyUrl) &&
+    typeof s.status === "string"
+  );
 }
 
 // Lazy imports so --help works without puppeteer installed.
@@ -160,40 +193,69 @@ async function cmdStart(jobId) {
 async function cmdListen() {
   let offset = 0;
   console.log("Listening for Telegram callbacks… (Ctrl-C to stop)");
+  const OPERATOR_ID = TG_CHAT ? String(TG_CHAT) : null;
   while (true) {
-    const updates = await tg("getUpdates", { timeout: 25, offset });
+    let updates;
+    try {
+      updates = await tg("getUpdates", { timeout: 25, offset });
+    } catch (err) {
+      // R2-8: network hiccup must not kill the loop; back off and retry.
+      console.error(
+        `getUpdates failed (${err instanceof Error ? err.message : err}); retrying in 5s`,
+      );
+      await new Promise((r) => setTimeout(r, 5_000));
+      continue;
+    }
+    if (!updates?.ok) {
+      // Telegram API error (429/500): back off instead of hot-looping.
+      await new Promise((r) => setTimeout(r, 5_000));
+      continue;
+    }
     for (const u of updates.result ?? []) {
       offset = u.update_id + 1;
-      const data = u.callback_query?.data;
-      const msg = u.callback_query?.message;
+      const cq = u.callback_query;
+      const data = cq?.data;
       if (!data) continue;
+      // R2-1 (sec audit run-2): only the operator may drive sessions. Every
+      // other sender is dropped before the verb is even parsed.
+      if (OPERATOR_ID && String(cq.from?.id ?? "") !== OPERATOR_ID) {
+        console.warn(`dropped callback from unauthorized sender ${cq.from?.id}`);
+        if (cq.id) await tg("answerCallbackQuery", { callback_query_id: cq.id }).catch(() => {});
+        continue;
+      }
+      const msg = cq?.message;
       const [verb, sessionId, ...rest] = data.split(" ");
       const runner = await getRunner();
       const load = loadSession;
-      if (verb === "APPROVE") {
-        const s = await loadSession(sessionId);
-        if (!s) continue;
-        await runner.handleAction({ kind: "approve", sessionId }, load, {
-          profile: loadProfile(),
-          resumePath: RESUME_PATH,
-        });
-      } else if (verb === "SUBMIT") {
-        const s = await loadSession(sessionId);
-        if (!s) continue;
-        await runner.handleAction({ kind: "submit", sessionId }, load);
-      } else if (verb === "ABANDON") {
-        await runner.handleAction({ kind: "abandon", sessionId }, load);
-      } else if (verb === "ANSWER" && rest.length > 0) {
-        // ANSWER <sessionId> <label>=<value> ...
-        const answers = {};
-        for (const pair of rest) {
-          const eq = pair.indexOf("=");
-          if (eq > 0) answers[pair.slice(0, eq)] = pair.slice(eq + 1);
+      try {
+        if (verb === "APPROVE") {
+          const s = await loadSession(sessionId);
+          if (!s) continue;
+          await runner.handleAction({ kind: "approve", sessionId }, load, {
+            profile: loadProfile(),
+            resumePath: RESUME_PATH,
+          });
+        } else if (verb === "SUBMIT") {
+          const s = await loadSession(sessionId);
+          if (!s) continue;
+          await runner.handleAction({ kind: "submit", sessionId }, load);
+        } else if (verb === "ABANDON") {
+          await runner.handleAction({ kind: "abandon", sessionId }, load);
+        } else if (verb === "ANSWER" && rest.length > 0) {
+          // ANSWER <sessionId> <label>=<value> ...
+          const answers = {};
+          for (const pair of rest) {
+            const eq = pair.indexOf("=");
+            if (eq > 0) answers[pair.slice(0, eq)] = pair.slice(eq + 1);
+          }
+          await runner.handleAction({ kind: "resume", sessionId, answers }, load);
         }
-        await runner.handleAction({ kind: "resume", sessionId, answers }, load);
+      } catch (err) {
+        // R2-8: one bad callback/session must not kill the listen loop.
+        console.error(`callback '${data}' failed: ${err instanceof Error ? err.message : err}`);
       }
-      if (msg?.message_id && u.callback_query?.id) {
-        await tg("answerCallbackQuery", { callback_query_id: u.callback_query.id });
+      if (msg?.message_id && cq?.id) {
+        await tg("answerCallbackQuery", { callback_query_id: cq.id }).catch(() => {});
       }
     }
   }

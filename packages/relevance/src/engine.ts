@@ -365,8 +365,18 @@ function nonUSRegion(location: string | undefined): string | null {
   const detected = hasAny(location, NON_US_REGIONS) ?? hasAny(location, NON_US_COUNTRIES);
   if (!detected) return null;
   // A US state/city next to the region (e.g. "Paris, TX" or "London, KY") is
-  // a real US location and must not be suppressed.
-  return looksUS(location) ? null : detected;
+  // a real US location and must not be suppressed. R2-4 (sec audit run-2):
+  // overriding a DETECTED COUNTRY requires strong US evidence — a state name
+  // or comma state code ("Los Angeles, Chile" must stay suppressed); the
+  // informal metro list alone is not enough.
+  const loc = location.toLowerCase();
+  const strongUS =
+    hasAny(loc, US_STATES_AND_TERRITORIES) !== null ||
+    (/, *([A-Za-z]{2})\b/.test(location) &&
+      (US_STATE_CODES as readonly string[]).includes(
+        (location.match(/, *([A-Za-z]{2})\b/) ?? [])[1]?.toUpperCase() ?? "",
+      ));
+  return strongUS ? null : detected;
 }
 
 /** Early-career scope gate: an intern/co-op/new-grad-style marker is required. */

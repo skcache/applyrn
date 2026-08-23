@@ -136,11 +136,37 @@ export class ApplicationRunner {
     const browser = await this.newBrowser();
     try {
       await browser.goto(gated.applyUrl);
-      // Re-fill everything (stateless page), then click submit once.
-      // NOTE: the host must pass the same profile; values come from the session.
-      // The runner re-uses the stored filled values verbatim.
+      // Re-fill everything (stateless page). R2-3 (sec audit run-2): every
+      // refill is VERIFIED — a field that fails to land pauses the session
+      // instead of clicking through to a half-filled submission. Manual
+      // answers (key "manual") carry no selector, so they are reported as
+      // skipped rather than silently dropped.
       for (const f of gated.filled) {
-        await browser.type(`[name="${f.key}"]`, f.value).catch(() => undefined);
+        if (f.key === "manual") continue; // never had a form target
+        const ok = await browser.type(`[name="${f.key}"]`, f.value);
+        if (!ok) {
+          const paused = transition(gated, "paused");
+          paused.paused.push({
+            label: f.label,
+            key: f.key,
+            reason: "submit aborted: field could not be re-filled on the final page",
+            required: true,
+          });
+          paused.filled = paused.filled.filter((x) => x !== f);
+          await this.hooks.saveSession?.(paused);
+          await this.hooks.notify(
+            `⏸ Submit aborted — "${f.label}" could not be re-filled (form changed?). Review the page and retry.`,
+            { actions: [[gated.applyUrl]] },
+          );
+          return paused;
+        }
+      }
+      const manualNotes = gated.filled.filter((f) => f.key === "manual");
+      if (manualNotes.length > 0) {
+        await this.hooks.notify(
+          `ℹ️ ${manualNotes.length} manually answered field(s) are NOT entered on this form — complete them by hand in the opened browser before confirming.\n` +
+            manualNotes.map((f) => `• ${f.label}: ${f.value}`).join("\n"),
+        );
       }
       await browser.evaluate(`(() => {
         const btn = document.querySelector('${submitSelector}');

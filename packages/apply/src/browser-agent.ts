@@ -82,9 +82,9 @@ export function inventoryFields(): InventoryField[] {
       required,
       type,
       selector: el.id
-        ? `#${el.id}`
+        ? `#${CSS.escape(el.id)}` // R2-6: board attrs must not inject selector branches
         : el.getAttribute("name")
-          ? `[name="${el.getAttribute("name")}"]`
+          ? `[name="${CSS.escape(el.getAttribute("name") ?? "")}"]`
           : "",
     });
   }

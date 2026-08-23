@@ -75,6 +75,22 @@ describe("location gate (US-only)", () => {
     expect(r2.suppressed).toBe(false);
   });
 
+  describe("V3 R2-4: metro alias must not override detected country", () => {
+    it("suppresses US-city-named locations abroad", () => {
+      for (const location of ["Los Angeles, Chile", "Portland, Ontario, Canada"]) {
+        const r = evaluateRelevance({ title: "Software Engineer Intern", location });
+        expect(r.suppressed).toBe(true);
+        expect(r.suppressionReason).toMatch(/Outside US/i);
+      }
+    });
+    it("still allows real US locations with foreign-sounding city names", () => {
+      for (const location of ["Paris, TX", "London, KY", "New York, NY", "Champaign, IL"]) {
+        const r = evaluateRelevance({ title: "Software Engineer Intern", location });
+        expect(r.suppressed).toBe(false);
+      }
+    });
+  });
+
   it("does not suppress a US city that shares a foreign name (Paris, TX)", () => {
     // "London, KY" and "Paris, TX" are real US cities.
     for (const location of ["Paris, TX", "London, KY"]) {
