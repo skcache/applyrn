@@ -27,6 +27,24 @@ import {
 
 type View = "live" | "applications" | "sources";
 
+/**
+ * All timestamps render in Pacific Time (PDT/PST) regardless of the viewing
+ * machine's locale — the operator's radar is US-market and the tape reads
+ * best in one fixed zone.
+ */
+const PDT_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function pdt(iso: string): string {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? `${PDT_FORMATTER.format(ms)} PT` : "—";
+}
+
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -336,16 +354,16 @@ function Detail({
           {job.publicationTimeKind === "authoritative" && job.sourcePublishedAt && (
             <div className="detail-item">
               <dt>Published</dt>
-              <dd className="mono">{new Date(job.sourcePublishedAt).toLocaleString()}</dd>
+              <dd className="mono">{pdt(job.sourcePublishedAt)}</dd>
             </div>
           )}
           <div className="detail-item">
             <dt>First seen</dt>
-            <dd className="mono">{new Date(job.firstSeenAt).toLocaleString()}</dd>
+            <dd className="mono">{pdt(job.firstSeenAt)}</dd>
           </div>
           <div className="detail-item">
             <dt>Detected</dt>
-            <dd className="mono">{new Date(job.detectedAt).toLocaleString()}</dd>
+            <dd className="mono">{pdt(job.detectedAt)}</dd>
           </div>
           {detectionLatency && (
             <div className="detail-item">
@@ -356,7 +374,7 @@ function Detail({
           {job.applicationAppliedAt && (
             <div className="detail-item">
               <dt>Applied</dt>
-              <dd className="mono">{new Date(job.applicationAppliedAt).toLocaleString()}</dd>
+              <dd className="mono">{pdt(job.applicationAppliedAt)}</dd>
             </div>
           )}
           {appliedLatency && (
