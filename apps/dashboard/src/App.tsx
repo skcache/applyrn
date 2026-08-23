@@ -746,6 +746,14 @@ export function App() {
                               ⏰ {pdt(a.deadlineAt)}
                             </span>
                           )}
+                          {a.interviewAt && (
+                            <span
+                              className="mono text-xs text-[var(--foreground)]"
+                              title={a.interviewLocation ?? "Interview"}
+                            >
+                              📅 {pdt(a.interviewAt)}
+                            </span>
+                          )}
                           <span className="mono text-xs text-[var(--muted-foreground)]">
                             {pdt(a.updatedAt)}
                           </span>

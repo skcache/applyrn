@@ -13,6 +13,7 @@ import { log } from "./logger.js";
 import { matchEmailToApplication, senderDomain, type LinkCandidate } from "./matcher.js";
 import { planTransition, EVENT_TO_STATUS, type AppStatus } from "./lifecycle.js";
 import { extractDeadline } from "./deadline.js";
+import { parseIcsEvent } from "./ics.js";
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -135,6 +136,12 @@ export interface GmailRepo {
     { id: number; company: string; role: string | null; status: string; deadline_at: string }[]
   >;
   markDeadlineReminded(applicationId: number, remindedAt: string): Promise<void>;
+  setInterviewSchedule(
+    applicationId: number,
+    whenIso: string | null,
+    location: string | null,
+  ): Promise<void>;
+  getIcsAttachment(messageId: string, accessToken: string): Promise<string | null>;
   findApplicationByDomain(
     domain: string,
   ): Promise<{ id: number; company: string; role: string | null } | null>;
@@ -492,6 +499,15 @@ export async function pollGmail(
             const dl = extractDeadline(parts.subject, parts.snippet, now);
             await repo.setApplicationDeadline(newId, dl.deadlineAt, dl.source);
           }
+          if (cls.eventClass === "interview_invite") {
+            const ics = await repo.getIcsAttachment(id, accessToken);
+            if (ics) {
+              const ev = parseIcsEvent(ics);
+              if (ev.start) {
+                await repo.setInterviewSchedule(newId, ev.start, ev.location);
+              }
+            }
+          }
           continue;
         }
         // Tier-2 hit: promote that application.
@@ -517,6 +533,15 @@ export async function pollGmail(
           if (cls.eventClass === "assessment_invite") {
             const dl = extractDeadline(parts.subject, parts.snippet, now);
             await repo.setApplicationDeadline(link.applicationId, dl.deadlineAt, dl.source);
+          }
+          if (cls.eventClass === "interview_invite") {
+            const ics = await repo.getIcsAttachment(id, accessToken);
+            if (ics) {
+              const ev = parseIcsEvent(ics);
+              if (ev.start) {
+                await repo.setInterviewSchedule(link.applicationId, ev.start, ev.location);
+              }
+            }
           }
         }
         continue;
@@ -545,6 +570,15 @@ export async function pollGmail(
         if (cls.eventClass === "assessment_invite") {
           const dl = extractDeadline(parts.subject, parts.snippet, now);
           await repo.setApplicationDeadline(domainHit.id, dl.deadlineAt, dl.source);
+        }
+        if (cls.eventClass === "interview_invite") {
+          const ics = await repo.getIcsAttachment(id, accessToken);
+          if (ics) {
+            const ev = parseIcsEvent(ics);
+            if (ev.start) {
+              await repo.setInterviewSchedule(domainHit.id, ev.start, ev.location);
+            }
+          }
         }
       }
     }

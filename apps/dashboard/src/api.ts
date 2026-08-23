@@ -143,6 +143,8 @@ export type OutcomeView = {
   status: string;
   updatedAt: string;
   deadlineAt?: string | null;
+  interviewAt?: string | null;
+  interviewLocation?: string | null;
 };
 
 export const OUTCOME_STATUSES = [

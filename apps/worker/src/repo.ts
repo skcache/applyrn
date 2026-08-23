@@ -417,11 +417,13 @@ export class D1Repository {
       status: string;
       updated_at: string;
       deadline_at: string | null;
+      interview_at: string | null;
+      interview_location: string | null;
     }[]
   > {
     const { results } = await this.db
       .prepare(
-        "SELECT id, company, role, status, updated_at, deadline_at FROM applications ORDER BY updated_at DESC LIMIT 200",
+        "SELECT id, company, role, status, updated_at, deadline_at, interview_at, interview_location FROM applications ORDER BY updated_at DESC LIMIT 200",
       )
       .all<{
         id: number;
@@ -430,6 +432,8 @@ export class D1Repository {
         status: string;
         updated_at: string;
         deadline_at: string | null;
+        interview_at: string | null;
+        interview_location: string | null;
       }>();
     return results;
   }
@@ -486,6 +490,57 @@ export class D1Repository {
   }
 
   /** V3 §3: CSV export rows (all applications, newest first). */
+  async setInterviewSchedule(
+    applicationId: number,
+    whenIso: string | null,
+    location: string | null,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        "UPDATE applications SET interview_at = ?, interview_location = ?, updated_at = ? WHERE id = ?",
+      )
+      .bind(whenIso, location, new Date().toISOString(), applicationId)
+      .run();
+  }
+
+  /**
+   * V3 §6: fetch the message's attachments and return the first text/calendar
+   * payload. Needs the caller's access token (Gmail REST, pure fetch).
+   */
+  async getIcsAttachment(messageId: string, accessToken: string): Promise<string | null> {
+    try {
+      const metaRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!metaRes.ok) return null;
+      const msg = (await metaRes.json()) as {
+        payload?: {
+          parts?: { filename?: string; mimeType?: string; body?: { attachmentId?: string } }[];
+        };
+      };
+      const parts = msg.payload?.parts ?? [];
+      const calPart = parts.find(
+        (p) => p.mimeType === "text/calendar" || (p.filename ?? "").endsWith(".ics"),
+      );
+      const attId = calPart?.body?.attachmentId;
+      if (!attId) return null;
+      const attRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${attId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!attRes.ok) return null;
+      const att = (await attRes.json()) as { data?: string };
+      if (!att.data) return null;
+      // base64url → utf8
+      const b64 = att.data.replace(/-/g, "+").replace(/_/g, "/");
+      const bin = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, "="));
+      return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    } catch {
+      return null;
+    }
+  }
+
   async listApplicationsForExport(): Promise<
     {
       id: number;

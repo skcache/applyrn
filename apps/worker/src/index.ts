@@ -427,6 +427,8 @@ export default {
       const apps = (await repo.listApplications()).map((a) => ({
         ...a,
         deadlineAt: a.deadline_at,
+        interviewAt: a.interview_at,
+        interviewLocation: a.interview_location,
       }));
       return Response.json({ applications: apps }, { headers: JSON_HEADERS });
     }
