@@ -157,7 +157,25 @@ function newSessionId() {
   return `s${Date.now().toString(36)}${sessionCounter++}`;
 }
 
+/**
+ * Only http(s) URLs may be driven by the agent. Blocks javascript:, data:,
+ * file:, and anything else puppeteer would happily navigate to.
+ */
+function assertHttpUrl(url, what) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    die(`${what} is not a valid URL: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    die(`${what} must be http(s), got: ${parsed.protocol}`);
+  }
+  return url;
+}
+
 async function cmdDryRun(jobUrl) {
+  assertHttpUrl(jobUrl, "job-url");
   const { launchBrowser } = await import("@applyrn/apply");
   const { runFillPass } = await import("@applyrn/apply");
   const profile = loadProfile();
@@ -185,7 +203,7 @@ async function cmdStart(jobId) {
     jobId: job.id,
     company: job.companyName,
     jobTitle: job.title,
-    applyUrl: job.applyUrl || job.jobUrl,
+    applyUrl: assertHttpUrl(job.applyUrl || job.jobUrl, "board apply URL"),
   });
   console.log("Session created. Check Telegram to approve.");
 }
