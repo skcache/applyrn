@@ -107,11 +107,12 @@ describe("V3 §2 lifecycle", () => {
 
 describe("V3 §2 notification tiers", () => {
   it("tier-1 events are audible, tier-2/3 silent", () => {
-    expect(NOTIFY_TIERS.interview_invite.silent).toBe(false);
-    expect(NOTIFY_TIERS.offer.silent).toBe(false);
-    expect(NOTIFY_TIERS.rejection.silent).toBe(true);
-    expect(NOTIFY_TIERS.application_confirmation.silent).toBe(true);
-    expect(NOTIFY_TIERS.assessment_invite.silent).toBe(true);
+    const t = (cls: string) => NOTIFY_TIERS[cls]!;
+    expect(t("interview_invite").silent).toBe(false);
+    expect(t("offer").silent).toBe(false);
+    expect(t("rejection").silent).toBe(true);
+    expect(t("application_confirmation").silent).toBe(true);
+    expect(t("assessment_invite").silent).toBe(true);
   });
 
   it("every classified event has a tier", () => {
