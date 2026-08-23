@@ -47,6 +47,8 @@ export type ApplicationSession = {
   paused: PausedField[];
   /** Free-text notes (e.g. what the human typed into a paused field). */
   notes?: string;
+  /** Which resume variant was used (set from RunOptions at approve time). */
+  resumeLabel?: string;
 };
 
 /** The only legal transitions. Everything else throws. */

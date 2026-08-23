@@ -754,6 +754,14 @@ export function App() {
                               📅 {pdt(a.interviewAt)}
                             </span>
                           )}
+                          {a.resumeLabel && (
+                            <span
+                              className="mono text-xs text-[var(--muted-foreground)] border border-[var(--border)] rounded px-1.5 py-0.5"
+                              title="Resume variant used"
+                            >
+                              {a.resumeLabel}
+                            </span>
+                          )}
                           <span className="mono text-xs text-[var(--muted-foreground)]">
                             {pdt(a.updatedAt)}
                           </span>

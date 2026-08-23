@@ -145,6 +145,7 @@ export type OutcomeView = {
   deadlineAt?: string | null;
   interviewAt?: string | null;
   interviewLocation?: string | null;
+  resumeLabel?: string | null;
 };
 
 export const OUTCOME_STATUSES = [

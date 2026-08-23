@@ -37,6 +37,8 @@ const PROFILE_PATH =
   process.env.APPLYRN_PROFILE ?? path.join(os.homedir(), ".applyrn", "profile.json");
 const SESSIONS_DIR = path.join(os.homedir(), ".applyrn", "sessions");
 const RESUME_PATH = process.env.APPLYRN_RESUME;
+// Which resume variant this session used (e.g. "backend", "fullstack").
+const RESUME_LABEL = process.env.APPLYRN_RESUME_LABEL ?? null;
 
 function die(msg) {
   console.error(`error: ${msg}`);
@@ -252,6 +254,7 @@ async function cmdListen() {
           await runner.handleAction({ kind: "approve", sessionId }, load, {
             profile: loadProfile(),
             resumePath: RESUME_PATH,
+            resumeLabel: RESUME_LABEL,
           });
         } else if (verb === "SUBMIT") {
           const s = await loadSession(sessionId);

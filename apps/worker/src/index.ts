@@ -350,6 +350,25 @@ export default {
       return Response.json({ outcome }, { headers: JSON_HEADERS });
     }
 
+    // V3 §7: set which resume version was sent.
+    if (request.method === "PATCH" && /^\/api\/outcomes\/\d+\/resume$/.test(url.pathname)) {
+      if (!(await isAuthorized(request, env))) return unauthorized();
+      const id = Number(url.pathname.split("/")[3]);
+      const body = (await request.json().catch(() => ({}))) as { label?: unknown };
+      if (typeof body.label !== "string" || body.label.trim().length === 0) {
+        return Response.json({ error: "label required" }, { status: 400, headers: JSON_HEADERS });
+      }
+      const current = await repo.getApplicationStatus(id);
+      if (!current) {
+        return Response.json(
+          { error: "application not found" },
+          { status: 404, headers: JSON_HEADERS },
+        );
+      }
+      await repo.setApplicationResumeLabel(id, body.label.trim().slice(0, 60));
+      return Response.json({ ok: true, label: body.label.trim() }, { headers: JSON_HEADERS });
+    }
+
     // V3 §3: CSV export of all tracked applications.
     if (request.method === "GET" && url.pathname === "/api/export/applications.csv") {
       if (!(await isAuthorized(request, env))) return unauthorized();
@@ -408,6 +427,7 @@ export default {
         company?: unknown;
         role?: unknown;
         status?: unknown;
+        resumeLabel?: unknown;
       };
       if (typeof body.company !== "string" || body.company.trim().length === 0) {
         return Response.json({ error: "company required" }, { status: 400, headers: JSON_HEADERS });
@@ -416,6 +436,10 @@ export default {
         company: body.company.trim().slice(0, 120),
         role: typeof body.role === "string" ? body.role.slice(0, 160) : undefined,
         status: typeof body.status === "string" ? body.status.toUpperCase() : undefined,
+        resumeLabel:
+          typeof body.resumeLabel === "string" && body.resumeLabel.trim()
+            ? body.resumeLabel.trim().slice(0, 60)
+            : undefined,
         now: new Date().toISOString(),
       });
       return Response.json({ ok: true, id }, { status: 201, headers: JSON_HEADERS });
@@ -429,6 +453,7 @@ export default {
         deadlineAt: a.deadline_at,
         interviewAt: a.interview_at,
         interviewLocation: a.interview_location,
+        resumeLabel: a.resume_label,
       }));
       return Response.json({ applications: apps }, { headers: JSON_HEADERS });
     }

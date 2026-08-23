@@ -43,6 +43,8 @@ export type RunnerHooks = {
 export type RunOptions = {
   profile: ApplicationProfile;
   resumePath?: string;
+  /** Which resume variant was used (e.g. "backend") — recorded for analytics. */
+  resumeLabel?: string;
   /** Max fill passes (multi-step boards). Safety bound. */
   maxSteps?: number;
 };
@@ -77,6 +79,7 @@ export class ApplicationRunner {
   /** Steps 2-4: run the agent after approval. Returns the final session. */
   async run(sessionIn: ApplicationSession, opts: RunOptions): Promise<ApplicationSession> {
     let session = approveRun(sessionIn);
+    if (opts?.resumeLabel) session.resumeLabel = opts.resumeLabel;
     await this.hooks.saveSession?.(session);
     const browser = await this.newBrowser();
     try {

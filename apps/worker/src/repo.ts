@@ -419,11 +419,12 @@ export class D1Repository {
       deadline_at: string | null;
       interview_at: string | null;
       interview_location: string | null;
+      resume_label: string | null;
     }[]
   > {
     const { results } = await this.db
       .prepare(
-        "SELECT id, company, role, status, updated_at, deadline_at, interview_at, interview_location FROM applications ORDER BY updated_at DESC LIMIT 200",
+        "SELECT id, company, role, status, updated_at, deadline_at, interview_at, interview_location, resume_label FROM applications ORDER BY updated_at DESC LIMIT 200",
       )
       .all<{
         id: number;
@@ -434,6 +435,7 @@ export class D1Repository {
         deadline_at: string | null;
         interview_at: string | null;
         interview_location: string | null;
+        resume_label: string | null;
       }>();
     return results;
   }
@@ -466,6 +468,7 @@ export class D1Repository {
     company: string;
     role?: string;
     status?: string;
+    resumeLabel?: string;
     now: string;
   }): Promise<number> {
     const res = await this.db
@@ -487,6 +490,13 @@ export class D1Repository {
         .run();
     }
     return id;
+  }
+
+  async setApplicationResumeLabel(applicationId: number, label: string | null): Promise<void> {
+    await this.db
+      .prepare("UPDATE applications SET resume_label = ?, updated_at = ? WHERE id = ?")
+      .bind(label, new Date().toISOString(), applicationId)
+      .run();
   }
 
   /** V3 §3: CSV export rows (all applications, newest first). */
