@@ -63,7 +63,11 @@ describe("V3 §1 classifier", () => {
         "Update on your application",
         "Unfortunately we are unable to offer you a position at this time",
       ],
-      ["noreply@ashbyhq.com", "Your application status", "regrettably we cannot offer you an interview"],
+      [
+        "noreply@ashbyhq.com",
+        "Your application status",
+        "regrettably we cannot offer you an interview",
+      ],
     ];
     for (const [from, subject, snippet] of cases as [string, string, string][]) {
       const r = classifyEmail(from, subject, snippet);

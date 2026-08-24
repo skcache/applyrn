@@ -8,7 +8,12 @@
 
 /** Every legal status — used to whitelist user-supplied values. */
 export const ALL_STATUSES: readonly AppStatus[] = [
-  "APPLIED", "OA", "INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN",
+  "APPLIED",
+  "OA",
+  "INTERVIEW",
+  "OFFER",
+  "REJECTED",
+  "WITHDRAWN",
 ];
 
 export type AppStatus = "APPLIED" | "OA" | "INTERVIEW" | "OFFER" | "REJECTED" | "WITHDRAWN";
