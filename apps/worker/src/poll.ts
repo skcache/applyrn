@@ -402,6 +402,7 @@ export class PollService {
             job: toPersist,
             relevance,
             kind: d.kind === "reopened" ? "reopened" : "new",
+            firstSeenAt: toPersist.firstSeenAt,
           });
         }
       }
@@ -511,7 +512,12 @@ export class PollService {
    */
   private async notifyNew(
     company: CompanyConfig,
-    jobs: { job: NormalizedJob; relevance: RelevanceResult; kind: "new" | "reopened" }[],
+    jobs: {
+      job: NormalizedJob;
+      relevance: RelevanceResult;
+      kind: "new" | "reopened";
+      firstSeenAt?: string;
+    }[],
     now: string,
     budget?: FetchBudget,
   ): Promise<number> {
@@ -534,7 +540,7 @@ export class PollService {
 
     const client = new TelegramClient(token);
     let sent = 0;
-    for (const { job, relevance, kind } of jobs) {
+    for (const { job, relevance, kind, firstSeenAt } of jobs) {
       const id = await jobId(job.provider, job.companyId, job.externalJobId);
 
       // Atomic claim (audit F6): the single-statement upsert is the
@@ -561,6 +567,7 @@ export class PollService {
         job,
         company,
         detectedAt: now,
+        firstSeenAt,
         match: { score: relevance.score, reasons: relevance.reasons },
         kind,
       });
@@ -652,6 +659,7 @@ export class PollService {
         job,
         company,
         detectedAt: job.detectedAt,
+        firstSeenAt: (job as { firstSeenAt?: string }).firstSeenAt,
         match: storedMatch,
       });
       const payload = buildSendMessagePayload(chatId, text, alertButtons(job));

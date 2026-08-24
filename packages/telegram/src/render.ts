@@ -7,6 +7,9 @@ export type RenderAlertInput = {
   job: NormalizedJob;
   company: CompanyConfig;
   detectedAt: string;
+  /** When this job was FIRST seen (JobRecord.firstSeenAt) — may predate
+   * detectedAt on re-alerts/reopens. Rendered when different. */
+  firstSeenAt?: string;
   match?: MatchInfo;
   /** Alert flavor: reopened jobs render REOPENED, everything else NEW. */
   kind?: "new" | "reopened";
@@ -34,13 +37,21 @@ export function renderAlertText(input: RenderAlertInput): string {
   lines.push(`\u{1F3E2} ${providerLabel(job.provider)}`);
   lines.push("");
 
+  // 2026-08-23 user request: Pacific times WITH date, and always render
+  // published (when known) + detected + age — never a bare "First seen" line.
   const detected = formatClock(detectedAt);
   if (job.publicationTimeKind === "authoritative" && job.sourcePublishedAt) {
     lines.push(`Published: ${formatClock(job.sourcePublishedAt)}`);
     lines.push(`Detected:  ${detected}`);
     lines.push(`Age:       ${formatAge(job.sourcePublishedAt, detectedAt)}`);
   } else {
-    lines.push(`First seen: ${detected}`);
+    const firstSeen = input.firstSeenAt ?? detectedAt;
+    lines.push(`First seen: ${formatClock(firstSeen)}`);
+    if (firstSeen !== detectedAt) {
+      // Re-alerts/reopens: show when THIS detection happened too.
+      lines.push(`Detected:  ${detected}`);
+      lines.push(`Age:       ${formatAge(firstSeen, detectedAt)} since first seen`);
+    }
   }
 
   if (match && match.reasons.length > 0) {
@@ -135,17 +146,34 @@ function providerLabel(provider: string): string {
   }
 }
 
-/** Local-time clock rendering, e.g. "5:14:03 PM". Times are UTC internally. */
-export function formatClock(iso: string): string {
+/**
+ * Pacific-time rendering WITH date, e.g. "Sat, Aug 23, 2025 · 5:14:03 PM PT".
+ * Workers run UTC internally; Intl.DateTimeFormat pins the zone explicitly so
+ * alert times are verifiable against America/Los_Angeles wall-clock regardless
+ * of where the isolate runs. (User request 2026-08-23: include the date.)
+ */
+const PT_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: true,
+});
+
+/** Compact PT stamp used inline in alerts: "Aug 23, 2025 · 5:14:03 PM PT". */
+export function formatPacific(iso: string): string {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const s = d.getSeconds().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${h}:${m}:${s} ${ampm}`;
+  if (Number.isNaN(d.getTime())) return `${iso} (unparseable)`;
+  return PT_FORMATTER.format(d).replace(",", "").replace(" at ", ", ") + " PT";
+}
+
+/** Legacy alias kept for tests/imports — now renders Pacific with date. */
+export function formatClock(iso: string): string {
+  return formatPacific(iso);
 }
 
 export function formatAge(fromIso: string, toIso: string): string {

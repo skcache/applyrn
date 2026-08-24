@@ -45,6 +45,8 @@ describe("renderAlertText", () => {
     expect(text).toContain("Published:");
     expect(text).toContain("Detected:");
     expect(text).toContain("Age:");
+    expect(text).toMatch(/Published: .*\d{4}.*PT/);
+    expect(text).toMatch(/Detected: {2}.*\d{4}.*PT/);
     expect(text).not.toContain("First seen");
   });
 
@@ -57,6 +59,8 @@ describe("renderAlertText", () => {
     const text = renderAlertText({ job: observed, company, detectedAt: "2026-08-14T17:14:31Z" });
     expect(text).toContain("First seen:");
     expect(text).not.toContain("Published:");
+    // 2026-08-23 user request: every timestamp carries its date (PT)
+    expect(text).toMatch(/First seen: .*\d{4}.*PT/);
     expect(text).not.toContain("Age:");
   });
 
@@ -105,8 +109,26 @@ describe("renderAlertText", () => {
 });
 
 describe("formatClock / formatAge", () => {
-  it("formats local clock", () => {
-    // 2026-08-14T17:14:03Z in a UTC test environment
+  it("renders Pacific time WITH date (2026-08-23 user request)", () => {
+    const out = formatClock("2026-08-14T17:14:03Z");
+    // 17:14 UTC on Aug 14 = 10:14 AM PT, same calendar day
+    expect(out).toContain("Aug 14, 2026");
+    expect(out).toContain("10:14:03 AM");
+    expect(out.endsWith("PT")).toBe(true);
+  });
+
+  it("rolls the PT date correctly across the UTC midnight boundary", () => {
+    // 2026-08-15T06:30:00Z = Aug 14, 11:30 PM PT — date must be Aug 14
+    const out = formatClock("2026-08-15T06:30:00Z");
+    expect(out).toContain("Aug 14, 2026");
+    expect(out).toContain("11:30:00 PM");
+  });
+
+  it("handles unparseable input without throwing", () => {
+    expect(formatClock("garbage")).toContain("(unparseable)");
+  });
+
+  it("formats local clock (legacy shape)", () => {
     const out = formatClock("2026-08-14T17:14:03Z");
     expect(out).toMatch(/\d{1,2}:\d{2}:\d{2} (AM|PM)/);
   });
