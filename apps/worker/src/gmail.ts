@@ -504,7 +504,12 @@ export async function pollGmail(
       if (!toStatus) continue;
 
       const senderDom = senderDomain(email);
-      const atsVerified = senderDom !== null && ATS_DOMAINS.has(senderDom);
+      // Exact OR subdomain match — real ATS mail arrives from tenant
+      // subdomains (acme.greenhouse.io, jobs.acme.myworkday.com).
+      const atsVerified =
+        senderDom !== null &&
+        (ATS_DOMAINS.has(senderDom) ||
+          [...ATS_DOMAINS].some((d) => senderDom.endsWith("." + d)));
       if (!atsVerified) {
         outcome.skipped++;
         continue;

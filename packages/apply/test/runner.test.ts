@@ -172,4 +172,46 @@ describe("ApplicationRunner", () => {
     expect(s.status).toBe("abandoned");
     expect(messages.some((m) => m.includes("Abandoned"))).toBe(true);
   });
+
+  it("C1 regression: refill failure during submit pauses (never failed/throws)", async () => {
+    const page: FakePage = {
+      fields: [
+        { label: "First name", selector: "#fn" },
+        { label: "Email", selector: "#email", required: true },
+      ],
+    };
+    const { h } = hooks();
+    let browserCount = 0;
+    const r2 = new ApplicationRunner(h, async () => {
+      browserCount++;
+      const b = await fakeBrowserFactory(page).factory();
+      if (browserCount === 1) return b; // fill pass succeeds
+      // Submit-time browser: first refill fails (form changed scenario).
+      let failed = false;
+      return {
+        ...b,
+        async type(_selector: string) {
+          if (!failed) {
+            failed = true;
+            return false;
+          }
+          return true;
+        },
+      } as never;
+    });
+    let s3 = await r2.createSession({
+      id: "sc2",
+      jobId: "j1",
+      company: "Example AI",
+      jobTitle: "Software Engineer Intern",
+      applyUrl: "https://x",
+    });
+    s3 = (await r2.handleAction({ kind: "approve", sessionId: s3.id }, async () => s3, {
+      profile,
+    }))!;
+    expect(s3.status).toBe("review");
+    const paused = await r2.submit(s3);
+    expect(paused.status).toBe("paused");
+    expect(paused.paused.some((p) => p.reason.includes("could not be re-filled"))).toBe(true);
+  });
 });
