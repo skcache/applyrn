@@ -508,8 +508,7 @@ export async function pollGmail(
       // subdomains (acme.greenhouse.io, jobs.acme.myworkday.com).
       const atsVerified =
         senderDom !== null &&
-        (ATS_DOMAINS.has(senderDom) ||
-          [...ATS_DOMAINS].some((d) => senderDom.endsWith("." + d)));
+        (ATS_DOMAINS.has(senderDom) || [...ATS_DOMAINS].some((d) => senderDom.endsWith("." + d)));
       if (!atsVerified) {
         outcome.skipped++;
         continue;
