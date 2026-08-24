@@ -234,12 +234,20 @@ async function cmdListen() {
     for (const u of updates.result ?? []) {
       offset = u.update_id + 1;
       const cq = u.callback_query;
-      const data = cq?.data;
+      let data = cq?.data;
+      // I13 fix: paused sessions are resolved by replying with a normal
+      // Telegram MESSAGE (ANSWER <sessionId> <label>=<value> …). The old loop
+      // only read callback_query.data, so those replies were invisible.
+      if (!data && u.message?.text) {
+        const t = u.message.text.trim();
+        if (/^ANSWER\b/.test(t)) data = t;
+      }
       if (!data) continue;
       // R2-1 (sec audit run-2): only the operator may drive sessions. Every
       // other sender is dropped before the verb is even parsed.
-      if (OPERATOR_ID && String(cq.from?.id ?? "") !== OPERATOR_ID) {
-        console.warn(`dropped callback from unauthorized sender ${cq.from?.id}`);
+      const senderId = String(cq?.from?.id ?? u.message?.from?.id ?? "");
+      if (OPERATOR_ID && senderId !== OPERATOR_ID) {
+        console.warn(`dropped update from unauthorized sender ${senderId}`);
         if (cq.id) await tg("answerCallbackQuery", { callback_query_id: cq.id }).catch(() => {});
         continue;
       }
@@ -263,9 +271,10 @@ async function cmdListen() {
         } else if (verb === "ABANDON") {
           await runner.handleAction({ kind: "abandon", sessionId }, load);
         } else if (verb === "ANSWER" && rest.length > 0) {
-          // ANSWER <sessionId> <label>=<value> ...
+          // I13 fix: ANSWER <sessionId> <n>=<value> where n is the 1-based
+          // number shown in the pause message (labels contain spaces).
           const answers = {};
-          for (const pair of rest) {
+          for (const pair of rest.slice(1)) {
             const eq = pair.indexOf("=");
             if (eq > 0) answers[pair.slice(0, eq)] = pair.slice(eq + 1);
           }
@@ -291,8 +300,14 @@ async function cmdStatus(id) {
   mkdirSync(SESSIONS_DIR, { recursive: true });
   const files = (await import("node:fs")).readdirSync(SESSIONS_DIR);
   for (const f of files.filter((x) => x.endsWith(".json"))) {
-    const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, f), "utf8"));
-    console.log(`${s.id}  ${s.status.padEnd(16)} ${s.company} — ${s.jobTitle}`);
+    try {
+      const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, f), "utf8"));
+      console.log(
+        `${s.id}  ${String(s.status ?? "?").padEnd(16)} ${s.company ?? "?"} — ${s.jobTitle ?? "?"}`,
+      );
+    } catch {
+      console.log(`${f}  (corrupt session file — skipped)`);
+    }
   }
 }
 

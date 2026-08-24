@@ -364,7 +364,7 @@ export class D1Repository {
     return (
       (await this.db
         .prepare(
-          "SELECT id, company, role FROM applications WHERE company_domain = ? AND status NOT IN ('REJECTED','WITHDRAWN') ORDER BY updated_at DESC LIMIT 1",
+          "SELECT id, company, role FROM applications WHERE company_domain = ? ORDER BY updated_at DESC LIMIT 1",
         )
         .bind(domain)
         .first<{ id: number; company: string; role: string | null }>()) ?? null
@@ -639,8 +639,9 @@ export class D1Repository {
   }
 
   /**
-   * Append a lifecycle event and promote the cached status in the same call.
-   * Returns false when the event was a no-op (duplicate/illegal).
+   * I4 fix: append the lifecycle event and promote the cached status in ONE
+   * D1 batch (atomic under D1's implicit transaction per batch). The caller
+   * is responsible for no-op/illegal-transition guards (lifecycle.planTransition).
    */
   async recordApplicationEvent(input: {
     applicationId: number;
@@ -650,27 +651,26 @@ export class D1Repository {
     toStatus: string;
     occurredAt: string;
     now: string;
-  }): Promise<boolean> {
-    await this.db
-      .prepare(
-        `INSERT INTO application_events (application_id, event_class, email_event_id, from_status, to_status, occurred_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        input.applicationId,
-        input.eventClass,
-        input.emailEventId ?? null,
-        input.fromStatus,
-        input.toStatus,
-        input.occurredAt,
-        input.now,
-      )
-      .run();
-    await this.db
-      .prepare("UPDATE applications SET status = ?, updated_at = ? WHERE id = ?")
-      .bind(input.toStatus, input.now, input.applicationId)
-      .run();
-    return true;
+  }): Promise<void> {
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO application_events (application_id, event_class, email_event_id, from_status, to_status, occurred_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.applicationId,
+          input.eventClass,
+          input.emailEventId ?? null,
+          input.fromStatus,
+          input.toStatus,
+          input.occurredAt,
+          input.now,
+        ),
+      this.db
+        .prepare("UPDATE applications SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(input.toStatus, input.now, input.applicationId),
+    ]);
   }
 
   async getLastGmailHistoryId(): Promise<string | null> {
@@ -680,6 +680,14 @@ export class D1Repository {
         value: string;
       }>();
     return row?.value ?? null;
+  }
+
+  async hasEmailEvent(gmailId: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 FROM email_events WHERE gmail_id = ?")
+      .bind(gmailId)
+      .first();
+    return row !== null;
   }
 
   async saveGmailHistoryId(id: string): Promise<void> {
@@ -692,7 +700,11 @@ export class D1Repository {
       .run();
   }
 
-  /** Idempotent insert; returns true when the row is NEW (false = seen before). */
+  /**
+   * Idempotent insert. Returns the new row id, or null when the event was a
+   * duplicate (already seen). Callers use the id as email_event_id so every
+   * transition keeps its source-email linkage.
+   */
   async insertEmailEvent(ev: {
     gmailId: string;
     threadId?: string;
@@ -704,7 +716,7 @@ export class D1Repository {
     confidence: number;
     receivedAt: string;
     now: string;
-  }): Promise<boolean> {
+  }): Promise<number | null> {
     const res = await this.db
       .prepare(
         `INSERT OR IGNORE INTO email_events
@@ -725,8 +737,8 @@ export class D1Repository {
         ev.now,
       )
       .run();
-    const meta = res.meta as unknown as { changes?: number };
-    return (meta?.changes ?? 0) > 0;
+    const meta = res.meta as unknown as { changes?: number; last_row_id?: number };
+    return (meta?.changes ?? 0) > 0 ? (meta?.last_row_id ?? null) : null;
   }
 
   async getSystemStatus(): Promise<{

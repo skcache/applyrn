@@ -19,7 +19,6 @@ export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const POLL_WINDOW_DAYS = 7; // history fallback window
-const MAX_MESSAGES_PER_POLL = 25;
 
 // --- Classifier tables -------------------------------------------------------
 // ATS senders observed in production filter files (jobseeker-analytics et al)
@@ -57,26 +56,30 @@ type Class =
   | "application_confirmation"
   | "unclassified";
 
+// R2 (LLM Council Contrarian fix): rejections checked BEFORE offers —
+// "unable to offer you a position" contains \\boffer\\b and would otherwise
+// classify a rejection as an offer at high confidence. The offer regex also
+// excludes negation contexts as defense-in-depth.
 const KEYWORD_TIERS: [Class, number, RegExp][] = [
   [
-    "offer",
-    0.95,
-    /\boffer\b|compensation package|extend(?:ed)? (?:an )?offer|congratulations.{0,40}position/i,
+    "rejection",
+    0.9,
+    /moved (?:forward|ahead) with other candidates|decided to move (?:forward|ahead) with other candidates|not moving forward|unable to offer|cannot offer|will not be proceeding|decided not to advance|position has been filled|no longer under consideration|after careful consideration/i,
   ],
   [
     "interview_invite",
-    0.9,
+    0.85,
     /\binterview\b|recruiting screen|recruiter screen|\bschedule a (?:call|chat|time)\b|availability for/i,
   ],
   [
     "assessment_invite",
-    0.85,
+    0.8,
     /hackerrank|codesignal|online assessment|take[- ]?home (?:assignment|exercise)|code assessment/i,
   ],
   [
-    "rejection",
-    0.8,
-    /moved forward with other candidates|not moving forward|unfortunately|will not be proceeding|decided not to advance|position has been filled|no longer under consideration/i,
+    "offer",
+    0.95,
+    /offer letter|compensation package|extend(?:ing)? (?:an |the )?offer to you|delighted to extend|(?:pleased|excited|would like) to offer you|offer of (?:admission|employment)|congratulations.{0,60}(?:position|role|offer)/i,
   ],
   [
     "application_confirmation",
@@ -121,9 +124,10 @@ export interface GmailRepo {
     confidence: number;
     receivedAt: string;
     now: string;
-  }): Promise<boolean>; // true = newly inserted (false = idempotent skip)
+  }): Promise<number | null>; // row id when newly inserted; null = duplicate
   getLastGmailHistoryId(): Promise<string | null>;
   saveGmailHistoryId(id: string): Promise<void>;
+  hasEmailEvent(gmailId: string): Promise<boolean>;
   setApplicationDeadline(
     applicationId: number,
     deadlineAt: string | null,
@@ -164,7 +168,7 @@ export interface GmailRepo {
     toStatus: string;
     occurredAt: string;
     now: string;
-  }): Promise<boolean>;
+  }): Promise<void>;
 }
 
 export class GmailError extends Error {
@@ -419,16 +423,45 @@ export async function pollGmail(
       `after:${gmailDateDaysAgo(POLL_WINDOW_DAYS)} ` +
       `-from:me in:inbox -category:promotions -category:social -category:forums`;
 
-    // List newest messages matching the job-lifecycle query.
-    const listRes = await fetch(
-      `${GMAIL_API}/messages?maxResults=${MAX_MESSAGES_PER_POLL}&q=${encodeURIComponent(q)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    if (listRes.status === 401) throw new GmailError("auth_expired", "access token rejected");
-    if (!listRes.ok) throw new GmailError("list_failed", `messages.list HTTP ${listRes.status}`);
-    const listed = (await listRes.json()) as { messages?: { id: string }[]; historyId?: string };
+    // I8 fix: paginate until we hit an already-stored message id (the sync
+    // watermark) so bursts >25 never silently drop mail. Page size 50.
+    const allIds: string[] = [];
+    let pageToken: string | undefined;
+    let reachedWatermark = false;
+    for (let page = 0; page < 5 && !reachedWatermark; page++) {
+      const url =
+        `${GMAIL_API}/messages?maxResults=50&q=${encodeURIComponent(q)}` +
+        (pageToken ? `&pageToken=${pageToken}` : "");
+      const listRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (listRes.status === 401) throw new GmailError("auth_expired", "access token rejected");
+      if (!listRes.ok) throw new GmailError("list_failed", `messages.list HTTP ${listRes.status}`);
+      const page = (await listRes.json()) as {
+        messages?: { id: string }[];
+        nextPageToken?: string;
+        historyId?: string;
+      };
+      for (const m of page.messages ?? []) {
+        // Watermark check happens before fetch of each message below; here we
+        // just collect. The per-message INSERT OR IGNORE dedupes overlaps, but
+        // stopping at the first KNOWN id avoids fetching pages of old mail.
+        if (allIds.includes(m.id)) continue;
+        const seen = await repo.hasEmailEvent(m.id);
+        if (seen) {
+          reachedWatermark = true;
+          break;
+        }
+        allIds.push(m.id);
+      }
+      pageToken = page.nextPageToken;
+      if (!pageToken) break;
+    }
+    const listed = {
+      messages: allIds.map((id) => ({ id })),
+      historyId: undefined as string | undefined,
+    };
+    void pageToken;
 
-    for (const { id } of listed.messages ?? []) {
+    for (const { id } of listed.messages) {
       outcome.fetched++;
       const getRes = await fetch(`${GMAIL_API}/messages/${id}?format=full`, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -445,7 +478,7 @@ export async function pollGmail(
 
       // Internal Date = original receive time (RFC822 ms), stable across polls.
       const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : now;
-      const inserted = await repo.insertEmailEvent({
+      const emailEventId = await repo.insertEmailEvent({
         gmailId: id,
         threadId: msg.threadId,
         fromEmail: email ?? undefined,
@@ -457,18 +490,22 @@ export async function pollGmail(
         receivedAt,
         now,
       });
-      if (inserted) outcome.stored++;
+      if (emailEventId !== null) outcome.stored++;
       else outcome.skipped++;
 
-      // V3 §2: promote applications. Only classified events with a status
-      // mapping participate; unclassified mail never touches the funnel.
+      // V3 §2: promote applications. Classified events participate even when
+      // they were duplicates (I4 fix): promotion is idempotent via
+      // planTransition's duplicate/illegal no-ops, so a replay can never lose
+      // a transition (the old `!inserted → continue` silently dropped them).
       const toStatus = EVENT_TO_STATUS[cls.eventClass];
-      if (!inserted || !toStatus) continue;
+      if (!toStatus) continue;
 
       const senderDom = senderDomain(email);
       const domainHit = senderDom ? await repo.findApplicationByDomain(senderDom) : null;
-      if (!domainHit) {
-        // Tier-2 candidates by company-token overlap against subject.
+      let applicationId: number | null = domainHit?.id ?? null;
+      let createdNew = false;
+
+      if (!applicationId) {
         const candidates = await repo.listActiveApplications();
         const link = matchEmailToApplication(
           senderDom,
@@ -476,108 +513,62 @@ export async function pollGmail(
           null,
           candidates as LinkCandidate[],
         );
-        if (!link.linked) {
-          // New application row from email evidence alone.
-          const newId = await repo.createApplication({
-            company: companyFromEvent(email, domain, parts.subject),
-            source: "email",
-            companyDomain: senderDom ?? undefined,
-            status: toStatus,
-            now,
-          });
-          await repo.recordApplicationEvent({
-            applicationId: newId,
-            eventClass: cls.eventClass,
-            emailEventId: undefined,
-            fromStatus: "DETECTED",
-            toStatus,
-            occurredAt: receivedAt,
-            now,
-          });
-          outcome.createdApplications++;
-          if (toStatus === "OA" && cls.eventClass === "assessment_invite") {
-            const dl = extractDeadline(parts.subject, parts.snippet, now);
-            await repo.setApplicationDeadline(newId, dl.deadlineAt, dl.source);
-          }
-          if (cls.eventClass === "interview_invite") {
-            const ics = await repo.getIcsAttachment(id, accessToken);
-            if (ics) {
-              const ev = parseIcsEvent(ics);
-              if (ev.start) {
-                await repo.setInterviewSchedule(newId, ev.start, ev.location);
-              }
-            }
-          }
-          continue;
-        }
-        // Tier-2 hit: promote that application.
-        const current2 = await repo.getApplicationStatus(link.applicationId);
-        if (!current2) continue;
-        const plan2 = planTransition(current2 as AppStatus, cls.eventClass);
-        if (plan2.action === "promote") {
-          await repo.recordApplicationEvent({
-            applicationId: link.applicationId,
-            eventClass: cls.eventClass,
-            emailEventId: undefined,
-            fromStatus: current2,
-            toStatus: plan2.to,
-            occurredAt: receivedAt,
-            now,
-          });
-          outcome.promoted.push({
-            applicationId: link.applicationId,
-            eventClass: cls.eventClass,
-            from: current2,
-            to: plan2.to,
-          });
-          if (cls.eventClass === "assessment_invite") {
-            const dl = extractDeadline(parts.subject, parts.snippet, now);
-            await repo.setApplicationDeadline(link.applicationId, dl.deadlineAt, dl.source);
-          }
-          if (cls.eventClass === "interview_invite") {
-            const ics = await repo.getIcsAttachment(id, accessToken);
-            if (ics) {
-              const ev = parseIcsEvent(ics);
-              if (ev.start) {
-                await repo.setInterviewSchedule(link.applicationId, ev.start, ev.location);
-              }
-            }
-          }
-        }
-        continue;
+        applicationId = link.linked ? link.applicationId : null;
       }
 
-      // Tier-1 hit (sender domain matches an existing application).
-      const current = await repo.getApplicationStatus(domainHit.id);
-      if (!current) continue;
-      const plan = planTransition(current as AppStatus, cls.eventClass);
+      if (!applicationId) {
+        // I6 fix: auto-create ONLY on strong evidence — ATS sender domain, or
+        // confidence ≥0.85 for interview/offer classes (a misrouted newsletter
+        // must not mint funnel rows).
+        const strongEvidence = senderDom !== null && ATS_DOMAINS.has(senderDom);
+        const highSignal =
+          cls.confidence >= 0.85 &&
+          (cls.eventClass === "interview_invite" || cls.eventClass === "offer");
+        if (!strongEvidence && !highSignal) continue;
+        applicationId = await repo.createApplication({
+          company: companyFromEvent(email, domain, parts.subject),
+          source: "email",
+          companyDomain: senderDom ?? undefined,
+          status: toStatus,
+          now,
+        });
+        createdNew = true;
+      }
+
+      const currentStatus = await repo.getApplicationStatus(applicationId);
+      if (!currentStatus) continue;
+      const plan = planTransition(currentStatus as AppStatus, cls.eventClass);
+
       if (plan.action === "promote") {
         await repo.recordApplicationEvent({
-          applicationId: domainHit.id,
+          applicationId,
           eventClass: cls.eventClass,
-          emailEventId: undefined,
-          fromStatus: current,
+          emailEventId: emailEventId,
+          fromStatus: currentStatus,
           toStatus: plan.to,
           occurredAt: receivedAt,
           now,
         });
         outcome.promoted.push({
-          applicationId: domainHit.id,
+          applicationId,
           eventClass: cls.eventClass,
-          from: current,
+          from: currentStatus,
           to: plan.to,
         });
-        if (cls.eventClass === "assessment_invite") {
-          const dl = extractDeadline(parts.subject, parts.snippet, now);
-          await repo.setApplicationDeadline(domainHit.id, dl.deadlineAt, dl.source);
-        }
-        if (cls.eventClass === "interview_invite") {
-          const ics = await repo.getIcsAttachment(id, accessToken);
-          if (ics) {
-            const ev = parseIcsEvent(ics);
-            if (ev.start) {
-              await repo.setInterviewSchedule(domainHit.id, ev.start, ev.location);
-            }
+      }
+
+      if (createdNew && cls.eventClass === "assessment_invite") {
+        const dl = extractDeadline(parts.subject, parts.snippet, now);
+        await repo.setApplicationDeadline(applicationId, dl.deadlineAt, dl.source);
+      } else if (cls.eventClass === "assessment_invite" && !createdNew) {
+        const dl2 = extractDeadline(parts.subject, parts.snippet, now);
+        await repo.setApplicationDeadline(applicationId, dl2.deadlineAt, dl2.source);
+      } else if (cls.eventClass === "interview_invite") {
+        const ics = await repo.getIcsAttachment(id, accessToken);
+        if (ics) {
+          const ev = parseIcsEvent(ics);
+          if (ev.start) {
+            await repo.setInterviewSchedule(applicationId, ev.start, ev.location);
           }
         }
       }

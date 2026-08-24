@@ -75,6 +75,29 @@ export function companyTokenSimilarity(nameA: string, nameB: string): number {
 
 export const COMPANY_MATCH_THRESHOLD = 0.5;
 
+/**
+ * I9 fix: single common-English-word company names whose bare mention is too
+ * weak to auto-link (the word appears in ordinary sentences constantly).
+ */
+const GENERIC_SINGLE_WORDS = new Set([
+  "linear",
+  "arc",
+  "ramp",
+  "brave",
+  "pitch",
+  "notion",
+  "stripe",
+  "square",
+  "scale",
+  "chalk",
+  "beam",
+  "core",
+  "loop",
+  "nova",
+  "prism",
+  "anchor",
+]);
+
 export type LinkCandidate = { id: number; company: string; role: string | null };
 
 export type LinkResult =
@@ -97,13 +120,28 @@ export function matchEmailToApplication(
   // Tier 2: company-token overlap against subject text (which usually names
   // the company: "We received your application for X at Acme").
   let best: { id: number; score: number } | null = null;
+  const subjectLower = ` ${subject.toLowerCase()} `;
   for (const c of candidates) {
     // Containment of company tokens within the subject (subject >> company
     // in length, so plain Jaccard would under-score every real match).
     const sim = tokenContainment(c.company, subject);
-    if (sim >= COMPANY_MATCH_THRESHOLD && (!best || sim > best.score)) {
-      best = { id: c.id, score: sim };
+    if (sim < COMPANY_MATCH_THRESHOLD) continue;
+    // I9 fix: single-common-word companies ("Linear", "Arc", "Ramp") link on
+    // any subject containing that English word. Require multi-token evidence
+    // for single-token names — the bare word alone is not enough.
+    const toks = [...tokenize(c.company)];
+    if (toks.length === 1) {
+      const w = toks[0];
+      if (!w) continue;
+      const standalone = new RegExp("(^|[^a-z0-9])" + w + "([^a-z0-9]|$)", "i").test(subjectLower);
+      if (!standalone) continue;
+      // Generic single English words need corroboration: an assessment or
+      // interview class event (higher signal than a newsletter).
+      if (GENERIC_SINGLE_WORDS.has(w)) {
+        if (!/(assessment|interview|hacker ?rank|codesignal)/i.test(subject)) continue;
+      }
     }
+    if (!best || sim > best.score) best = { id: c.id, score: sim };
   }
   if (best) return { linked: true, applicationId: best.id, tier: "company" };
   return { linked: false };

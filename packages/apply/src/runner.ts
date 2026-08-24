@@ -25,6 +25,11 @@ import {
 } from "./session.js";
 import { runFillPass, type BrowserLike, type FillResult } from "./browser-agent.js";
 
+/** Mirror of DOM CSS.escape for attribute-selector values (R2-6 parity). */
+function CSS_ESCAPE(v: string): string {
+  return v.replace(/([^a-zA-Z0-9_-])/g, "\\$1");
+}
+
 export type TelegramAction =
   | { kind: "approve"; sessionId: string }
   | { kind: "submit"; sessionId: string }
@@ -97,8 +102,10 @@ export class ApplicationRunner {
         await this.hooks.saveSession?.(session);
 
         if (result.paused.length > 0) {
+          // I13 fix: number each paused field; replies use n=<value> which
+          // resolvePauses maps back via label position.
           const lines = result.paused
-            .map((p) => `• ${p.label}${p.required ? " (required)" : ""} — ${p.reason}`)
+            .map((p, i) => `${i + 1}. ${p.label}${p.required ? " (required)" : ""} — ${p.reason}`)
             .join("\n");
           await this.hooks.notify(
             `⏸ Paused — need your input on ${result.paused.length} field(s):\n${lines}\n\nReply with: ANSWER <label>=<value> (one per line)`,
@@ -146,7 +153,8 @@ export class ApplicationRunner {
       // skipped rather than silently dropped.
       for (const f of gated.filled) {
         if (f.key === "manual") continue; // never had a form target
-        const ok = await browser.type(`[name="${f.key}"]`, f.value);
+        const sel = `[name="${CSS_ESCAPE(f.key)}"]`;
+        const ok = await browser.type(sel, f.value);
         if (!ok) {
           const paused = transition(gated, "paused");
           paused.paused.push({
@@ -171,16 +179,62 @@ export class ApplicationRunner {
             manualNotes.map((f) => `• ${f.label}: ${f.value}`).join("\n"),
         );
       }
-      await browser.evaluate(`(() => {
+      // I1 fix: verify the submit button was actually found+clicked. A plain
+      // <button>Submit</button> has no type attr, so probe progressively.
+      let clicked = await browser.evaluate(`(() => {
         const btn = document.querySelector('${submitSelector}');
         if (btn) { btn.click(); return true; }
         return false;
       })()`);
-      const submitted = transition(gated, "submitted");
-      await this.hooks.saveSession?.(submitted);
-      await this.hooks.notify(`✅ Submitted: ${submitted.jobTitle} @ ${submitted.company}`);
-      await this.hooks.setJobStatus?.(submitted.jobId, "APPLIED");
-      return submitted;
+      if (!clicked) {
+        clicked = await browser.evaluate(`(() => {
+          const btns = Array.from(document.querySelectorAll('button, input[type=button], input[type=submit], [role=button], a'));
+          const t = (b) => ((b.textContent || b.value || '')).trim().toLowerCase();
+          const btn = btns.find((b) => /submit application|^submit$|send application/.test(t(b)));
+          if (btn) { btn.click(); return true; }
+          return false;
+        })()`);
+      }
+      if (!clicked) {
+        const paused = transition(gated, "paused");
+        paused.paused.push({
+          label: "Submit button",
+          key: "__submit__",
+          reason: "submit aborted: no submit control found on the final page",
+          required: true,
+        });
+        await this.hooks.saveSession?.(paused);
+        await this.hooks.notify(
+          `⏸ Submit aborted — no submit button found on the final page. Review and retry.`,
+          { actions: [[gated.applyUrl]] },
+        );
+        return paused;
+      }
+
+      // I2 fix: past this point the application HAS been sent. Side-effect
+      // failures must NOT mark failed (human would retry → duplicate).
+      try {
+        const submitted = transition(gated, "submitted");
+        await this.hooks.saveSession?.(submitted);
+        await this.hooks.notify(`✅ Submitted: ${submitted.jobTitle} @ ${submitted.company}`);
+        try {
+          await this.hooks.setJobStatus?.(submitted.jobId, "APPLIED");
+        } catch {
+          await this.hooks.notify(
+            `⚠️ Submitted, but the dashboard could not be updated — set ${submitted.jobTitle} @ ${submitted.company} to APPLIED manually.`,
+          );
+        }
+        return submitted;
+      } catch (err) {
+        // Post-click notification/save failure: the click happened. Keep
+        // submitted status rather than allowing a duplicate submission.
+        const submitted = transition(gated, "submitted");
+        await this.hooks.saveSession?.(submitted);
+        await this.hooks.notify(
+          `⚠️ Clicked submit on ${submitted.jobTitle} @ ${submitted.company}, but confirmation steps failed: ${err instanceof Error ? err.message : "unknown"}. Do NOT resubmit.`,
+        );
+        return submitted;
+      }
     } catch (err) {
       const failed = transition(gated, "failed");
       await this.hooks.saveSession?.(failed);

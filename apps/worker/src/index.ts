@@ -14,6 +14,7 @@ import { PollScheduler } from "./scheduler.js";
 import { log } from "./logger.js";
 import { pollGmail } from "./gmail.js";
 import { sweepDeadlines } from "./deadline-sweep.js";
+import { ALL_STATUSES } from "./lifecycle.js";
 
 /**
  * ApplyRN Worker: cron-driven poll cycle + minimal HTTP API.
@@ -373,9 +374,14 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/export/applications.csv") {
       if (!(await isAuthorized(request, env))) return unauthorized();
       const rows = await repo.listApplicationsForExport();
+      // I15 fix: neutralize CSV formula injection (=, +, -, @ prefixes
+      // execute as formulas in Excel/Sheets) and always quote \\r-containing
+      // values. Board/email-derived strings reach this export verbatim.
       const esc = (v: string | number | null) => {
-        const s = String(v ?? "");
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        let s = String(v ?? "");
+        if (/^[-=@]|^\+/.test(s)) s = `'${s}`;
+        const needsQuotes = /[",\n\r]/.test(s);
+        return needsQuotes ? `"${s.replace(/"/g, '""').replace(/\r/g, "")}"` : s;
       };
       const csv =
         "id,company,role,status,created_at,updated_at\n" +
@@ -398,8 +404,16 @@ export default {
       if (!(await isAuthorized(request, env))) return unauthorized();
       const id = Number(url.pathname.split("/")[3]);
       const body = (await request.json().catch(() => ({}))) as { status?: unknown };
-      if (typeof body.status !== "string") {
-        return Response.json({ error: "status required" }, { status: 400, headers: JSON_HEADERS });
+      // I7 fix: whitelist — a garbage status would wedge planTransition
+      // (ALLOWED[garbage] is undefined) for ALL future Gmail processing.
+      if (
+        typeof body.status !== "string" ||
+        !(ALL_STATUSES as readonly string[]).includes(body.status.toUpperCase())
+      ) {
+        return Response.json(
+          { error: `status must be one of: ${ALL_STATUSES.join(", ")}` },
+          { status: 400, headers: JSON_HEADERS },
+        );
       }
       const current = await repo.getApplicationStatus(id);
       if (!current) {
@@ -435,7 +449,11 @@ export default {
       const id = await repo.createManualApplication({
         company: body.company.trim().slice(0, 120),
         role: typeof body.role === "string" ? body.role.slice(0, 160) : undefined,
-        status: typeof body.status === "string" ? body.status.toUpperCase() : undefined,
+        status:
+          typeof body.status === "string" &&
+          (ALL_STATUSES as readonly string[]).includes(body.status.toUpperCase())
+            ? body.status.toUpperCase()
+            : undefined,
         resumeLabel:
           typeof body.resumeLabel === "string" && body.resumeLabel.trim()
             ? body.resumeLabel.trim().slice(0, 60)

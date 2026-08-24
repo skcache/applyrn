@@ -69,7 +69,16 @@ export const FIELD_SYNONYMS: Record<string, string[]> = {
   ],
   work_authorization: ["work authorization", "authorized to work", "legally authorized"],
   sponsorship: ["sponsorship", "require sponsorship", "visa sponsorship"],
-  salary: ["salary", "compensation expectations", "desired salary", "pay expectations"],
+  salary: [
+    "salary",
+    "salary expectations",
+    "expected salary",
+    "compensation expectations",
+    "desired compensation",
+    "desired salary",
+    "pay expectations",
+    "salary requirements",
+  ],
   start_date: ["start date", "available start", "earliest start date"],
   why_company: ["why do you want to work", "why this company", "why us"],
   cover_letter: ["cover letter", "cover note"],
@@ -93,9 +102,31 @@ export const DEFAULT_LABEL_STOP_LIST = [
 
 /** Map a form label to a canonical key, or null when unknown. */
 export function canonicalKeyForLabel(label: string): string | null {
-  const norm = label.toLowerCase().replace(/[*_:]/g, " ").replace(/\s+/g, " ").trim();
+  const norm = label
+    .toLowerCase()
+    .replace(/[*_:]/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normSyn = (syn: string) =>
+    syn
+      .toLowerCase()
+      .replace(/[*_:-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   for (const [key, synonyms] of Object.entries(FIELD_SYNONYMS)) {
-    if (synonyms.some((s) => norm === s || norm.includes(s))) return key;
+    for (const raw of synonyms) {
+      const s = normSyn(raw);
+      // I14 fix: SHORT generic synonyms ("name", "email", "phone") must match
+      // the whole normalized label — substring matching made a field labeled
+      // "Company Name" map to full_name and get auto-filled with the user's
+      // name. Multiword phrases still match by containment.
+      if (s.includes(" ")) {
+        if (norm.includes(s)) return key;
+      } else if (norm === s) {
+        return key;
+      }
+    }
   }
   return null;
 }
@@ -122,7 +153,11 @@ export function planField(
 ): FieldPlan {
   const lowerLabel = field.label.toLowerCase();
   if (profile.labelStopList.some((s) => lowerLabel.includes(s))) {
-    return { action: "pause", key: null, reason: `stop-list label: "${field.label}"` };
+    return {
+      action: "pause",
+      key: canonicalKeyForLabel(field.label),
+      reason: `stop-list label: "${field.label}"`,
+    };
   }
   const key = canonicalKeyForLabel(field.label);
   if (!key) {

@@ -18,6 +18,7 @@
  */
 
 import http from "node:http";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const WORKER_URL = process.env.APPLYRN_WORKER_URL ?? "";
@@ -41,6 +42,11 @@ if (!CLIENT_ID || !CLIENT_SECRET) die("set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SE
 // 1. Loopback listener on a random port.
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1`);
+  if (url.searchParams.get("state") !== expectedState) {
+    res.writeHead(400, { "Content-Type": "text/html" });
+    res.end("<h2>❌ state mismatch — ignoring</h2>");
+    return;
+  }
   const code = url.searchParams.get("code");
   const err = url.searchParams.get("error");
   res.writeHead(200, { "Content-Type": "text/html" });
@@ -55,9 +61,17 @@ const server = http.createServer((req, res) => {
 });
 
 let redirectUri = "";
+let expectedState = "";
+let pkceVerifier = "";
 server.listen(0, "127.0.0.1", () => {
   const port = server.address().port;
   redirectUri = `http://127.0.0.1:${port}`;
+  // Minor-fix: CSRF state + PKCE (Google supports S256) for the loopback flow.
+  expectedState = crypto.randomBytes(16).toString("hex");
+  pkceVerifier = crypto.randomBytes(32).toString("base64url");
+  const state = expectedState;
+  const verifier = crypto.randomBytes(32).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
@@ -66,6 +80,9 @@ server.listen(0, "127.0.0.1", () => {
     access_type: "offline", // ask for a refresh token
     prompt: "consent", // force refresh_token even on prior grants
     include_granted_scopes: "false",
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
   });
   const consentUrl = `${AUTH_ENDPOINT}?${params}`;
   console.log("Opening browser for Gmail consent…\n" + consentUrl);
@@ -87,6 +104,7 @@ async function finish(code) {
         client_secret: CLIENT_SECRET,
         redirect_uri: redirectUri,
         grant_type: "authorization_code",
+        code_verifier: pkceVerifier,
       }),
     });
     if (!res.ok) die(`token exchange failed: HTTP ${res.status} ${await res.text()}`);

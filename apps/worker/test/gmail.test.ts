@@ -56,6 +56,28 @@ describe("V3 §1 classifier", () => {
     expect(r.eventClass).toBe("application_confirmation");
   });
 
+  it("R2 council fix: negated-offer rejections classify as rejection, not offer", () => {
+    const cases = [
+      [
+        "notifications@acme.myworkday.com",
+        "Update on your application",
+        "Unfortunately we are unable to offer you a position at this time",
+      ],
+      ["noreply@ashbyhq.com", "Your application status", "regrettably we cannot offer you an interview"],
+    ];
+    for (const [from, subject, snippet] of cases as [string, string, string][]) {
+      const r = classifyEmail(from, subject, snippet);
+      expect(r.eventClass).toBe("rejection");
+    }
+    // Genuine offers still classify as offer:
+    const real = classifyEmail(
+      "noreply@greenhouse.io",
+      "Great news from Acme",
+      "we would like to offer you the position",
+    );
+    expect(real.eventClass).toBe("offer");
+  });
+
   it("returns unclassified for noise, low confidence", () => {
     const r = classifyEmail("friend@gmail.com", "lunch tomorrow?", "");
     expect(r.eventClass).toBe("unclassified");

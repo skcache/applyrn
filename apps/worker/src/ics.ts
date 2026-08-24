@@ -34,7 +34,19 @@ function unfold(ics: string): string[] {
 
 /** Convert an iCal date(-time) value to ISO. Returns null when unparseable. */
 export function parseIcsDate(value: string): string | null {
+  // TZID-parameter times arrive via the prop (handled by caller); a raw value
+  // with an explicit numeric offset (20260901T170000-0700) is honored here.
   const v = value.trim();
+  const off = v.match(/^(\d{8}T\d{6})([+-]\d{4})$/);
+  if (off) {
+    const base = parseIcsDate(off[1] ?? "");
+    if (!base) return null;
+    const sign = off[2]?.[0] === "-" ? -1 : 1;
+    const hh = Number(off[2]?.slice(1, 3) ?? 0);
+    const mm = Number(off[2]?.slice(3, 5) ?? 0);
+    const ms = Date.parse(base) - sign * (hh * 3600_000 + mm * 60_000);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
   // DATE value: YYYYMMDD
   const dateOnly = v.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (dateOnly) {

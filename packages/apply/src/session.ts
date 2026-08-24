@@ -58,7 +58,7 @@ const TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   filling: ["review", "paused", "failed", "abandoned"],
   paused: ["filling", "review", "abandoned"], // resume after human input
   review: ["submitting", "filling", "abandoned"], // back to filling = edits requested
-  submitting: ["submitted", "failed"],
+  submitting: ["submitted", "paused", "failed"], // paused = refill verification aborted pre-click
   failed: ["filling", "abandoned"],
   submitted: [],
   abandoned: [],
@@ -99,7 +99,13 @@ export function recordFillPass(
   filled: ApplicationSession["filled"],
   paused: PausedField[],
 ): ApplicationSession {
-  const withFills = { ...session, filled, paused };
+  // I3 fix: multi-step forms fill page-by-page. ACCUMULATE fields across
+  // passes (merged by key) so the review summary and submit refill see every
+  // field from every step — not just the last pass.
+  const merged = new Map(session.filled.map((f) => [f.key || f.label, f]));
+  for (const f of filled) merged.set(f.key || f.label, f);
+  const allFilled = [...merged.values()];
+  const withFills = { ...session, filled: allFilled, paused };
   const inFlight = withFills.status === "approved" ? transition(withFills, "filling") : withFills;
   return transition(inFlight, paused.length > 0 ? "paused" : "review");
 }
@@ -109,8 +115,19 @@ export function resolvePauses(
   session: ApplicationSession,
   resolutions: Record<string, string>,
 ): ApplicationSession {
-  const resolvedPaused = session.paused.filter((p) => !resolutions[p.label]);
-  const extraFilled = Object.entries(resolutions).map(([label, value]) => ({
+  // I13 fix: accept BOTH "<label>=<value>" and "<n>=<value>" (1-based paused
+  // index) — labels contain spaces and can't round-trip through compact
+  // Telegram replies.
+  const byLabel = new Map(session.paused.map((p, i) => [p.label, { ...p, _n: String(i + 1) }]));
+  const normalized: Record<string, string> = {};
+  for (const [k, v] of Object.entries(resolutions)) {
+    const hit = session.paused.find((p) => p.label === k) ?? session.paused[Number(k) - 1] ?? null;
+    if (hit) normalized[hit.label] = v;
+    else normalized[k] = v; // unknown keys pass through unchanged
+  }
+  void byLabel;
+  const resolvedPaused = session.paused.filter((p) => !normalized[p.label]);
+  const extraFilled = Object.entries(normalized).map(([label, value]) => ({
     key: session.paused.find((p) => p.label === label)?.key ?? "manual",
     label,
     value,

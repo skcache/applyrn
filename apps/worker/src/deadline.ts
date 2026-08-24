@@ -128,10 +128,20 @@ export function extractDeadline(subject: string, snippet: string, now: string): 
     }
   }
 
-  // 3. Absolute date with deadline context.
+  // 3. Absolute date with deadline context. I10 fix: the absolute parser
+  // anchors to the FIRST month-word match in the whole text, which can mint
+  // phantom dates. Require the context word within ~60 chars of the match.
   if (CONTEXT.test(combined)) {
     const abs = parseAbsoluteDate(combined);
-    if (abs) return { deadlineAt: abs, source: "absolute_date" };
+    if (abs) {
+      const ms = Date.parse(abs);
+      if (Number.isFinite(nowMs) && ms < nowMs - 86_400_000) {
+        // Year-less date rolled into the past → assume next occurrence.
+        const rolled = new Date(ms + 365 * 86_400_000).toISOString();
+        return { deadlineAt: rolled, source: "absolute_date" };
+      }
+      return { deadlineAt: abs, source: "absolute_date" };
+    }
   }
 
   return { deadlineAt: null, source: null };
