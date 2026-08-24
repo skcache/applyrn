@@ -295,6 +295,7 @@ export class PollService {
         job: NormalizedJob;
         relevance: RelevanceResult;
         kind: "new" | "reopened";
+        firstSeenAt?: string;
       }[] = [];
       // D1 subrequest budget: Cloudflare caps per-invocation API calls
       // (default ~1000). Per-job round trips blow that on first baseline
