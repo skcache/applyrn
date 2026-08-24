@@ -84,6 +84,8 @@ export type CycleSummary = {
   skippedInterval: number;
   retried: number;
   durationMs: number;
+  /** Subrequests left in this invocation's shared pool (run-3 C3). */
+  budgetLeft?: number;
 };
 
 export type RunCycleOptions = {
@@ -200,6 +202,7 @@ export class PollScheduler implements Poller {
       skippedInterval,
       retried,
       durationMs,
+      budgetLeft: budget?.left,
     };
 
     // Structured cycle summary (PRD Issue 11: scheduler heartbeat). One JSON

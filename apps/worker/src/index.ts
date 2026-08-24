@@ -108,11 +108,33 @@ export default {
     env: WorkerEnv,
     ctx: ExecutionContext,
   ): Promise<void> {
-    ctx.waitUntil(buildScheduler(env).runCycle(new Date().toISOString(), { trigger: "cf-cron" }));
+    let gmailDeferredThisTick = false;
+    ctx.waitUntil(
+      buildScheduler(env)
+        .runCycle(new Date().toISOString(), { trigger: "cf-cron" })
+        .then((r) => {
+          // Any budget-deferred shard means the 50-subrequest wall is close —
+          // don't stack the Gmail poll on top of it this tick.
+          if (
+            typeof r?.budgetLeft === "number" &&
+            r.budgetLeft < 5 // keep a margin for the Gmail poll's own fetches
+          ) {
+            gmailDeferredThisTick = true;
+          }
+        }),
+    );
     // V3 §1: Gmail outcome poll rides the same cron, phase-gated to ~every
     // 10 minutes. Skipped silently when GOOGLE_CLIENT_ID is not configured
     // (feature flag by absence of secrets — nothing else to flip).
-    if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && new Date().getUTCMinutes() % 10 === 0) {
+    // Run-3/C3: defer the Gmail poll when this cron invocation already ran a
+    // heavy shard cycle (deferredN > 0 means the 50-subrequest wall was near).
+    // The next 10-min tick picks it up — email polling tolerates 10-min gaps.
+    if (
+      env.GOOGLE_CLIENT_ID &&
+      env.GOOGLE_CLIENT_SECRET &&
+      new Date().getUTCMinutes() % 10 === 0 &&
+      !gmailDeferredThisTick
+    ) {
       const repo = new D1Repository(env.DB);
       const gmailEnv = {
         GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
