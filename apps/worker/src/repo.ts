@@ -581,8 +581,12 @@ export class D1Repository {
     deadlineAt: string | null,
     source: string | null,
   ): Promise<void> {
+    // Run-3 hardening: a NEW deadline must re-arm the reminder (the old code
+    // left deadline_reminded_at set, silently skipping replacement deadlines).
     await this.db
-      .prepare("UPDATE applications SET deadline_at = ?, updated_at = ? WHERE id = ?")
+      .prepare(
+        "UPDATE applications SET deadline_at = ?, deadline_reminded_at = NULL, updated_at = ? WHERE id = ?",
+      )
       .bind(deadlineAt, new Date().toISOString(), applicationId)
       .run();
     if (deadlineAt) {

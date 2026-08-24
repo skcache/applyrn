@@ -10,7 +10,7 @@
  */
 
 import { log } from "./logger.js";
-import { matchEmailToApplication, senderDomain, type LinkCandidate } from "./matcher.js";
+import { senderDomain } from "./matcher.js";
 import { planTransition, EVENT_TO_STATUS, type AppStatus } from "./lifecycle.js";
 import { extractDeadline } from "./deadline.js";
 import { parseIcsEvent } from "./ics.js";
@@ -493,68 +493,59 @@ export async function pollGmail(
       if (emailEventId !== null) outcome.stored++;
       else outcome.skipped++;
 
-      // V3 §2: promote applications. Classified events participate even when
-      // they were duplicates (I4 fix): promotion is idempotent via
-      // planTransition's duplicate/illegal no-ops, so a replay can never lose
-      // a transition (the old `!inserted → continue` silently dropped them).
+      // V3 §2 + run-3 F1/F3 fixes: STATUS CHANGES require tier-1 evidence —
+      // the sender must be a known ATS domain. Tier-2 subject-token matching
+      // alone let any email ("Cloudscale update — unable to offer you a
+      // position") flip a real application to terminal REJECTED / fake OFFER.
+      // Non-ATS mail stays stored as an email_event but never touches funnel
+      // statuses. F3: auto-create requires the same ATS signal (the old
+      // conf>=0.85 path fired at exactly 0.85).
       const toStatus = EVENT_TO_STATUS[cls.eventClass];
       if (!toStatus) continue;
 
       const senderDom = senderDomain(email);
-      const domainHit = senderDom ? await repo.findApplicationByDomain(senderDom) : null;
+      const atsVerified = senderDom !== null && ATS_DOMAINS.has(senderDom);
+      if (!atsVerified) {
+        outcome.skipped++;
+        continue;
+      }
+
+      const domainHit = await repo.findApplicationByDomain(senderDom);
       let applicationId: number | null = domainHit?.id ?? null;
       let createdNew = false;
 
       if (!applicationId) {
-        const candidates = await repo.listActiveApplications();
-        const link = matchEmailToApplication(
-          senderDom,
-          parts.subject,
-          null,
-          candidates as LinkCandidate[],
-        );
-        applicationId = link.linked ? link.applicationId : null;
-      }
-
-      if (!applicationId) {
-        // I6 fix: auto-create ONLY on strong evidence — ATS sender domain, or
-        // confidence ≥0.85 for interview/offer classes (a misrouted newsletter
-        // must not mint funnel rows).
-        const strongEvidence = senderDom !== null && ATS_DOMAINS.has(senderDom);
-        const highSignal =
-          cls.confidence >= 0.85 &&
-          (cls.eventClass === "interview_invite" || cls.eventClass === "offer");
-        if (!strongEvidence && !highSignal) continue;
         applicationId = await repo.createApplication({
           company: companyFromEvent(email, domain, parts.subject),
           source: "email",
-          companyDomain: senderDom ?? undefined,
+          companyDomain: senderDom,
           status: toStatus,
           now,
         });
         createdNew = true;
       }
 
-      const currentStatus = await repo.getApplicationStatus(applicationId);
-      if (!currentStatus) continue;
-      const plan = planTransition(currentStatus as AppStatus, cls.eventClass);
-
-      if (plan.action === "promote") {
-        await repo.recordApplicationEvent({
-          applicationId,
-          eventClass: cls.eventClass,
-          emailEventId: emailEventId,
-          fromStatus: currentStatus,
-          toStatus: plan.to,
-          occurredAt: receivedAt,
-          now,
-        });
-        outcome.promoted.push({
-          applicationId,
-          eventClass: cls.eventClass,
-          from: currentStatus,
-          to: plan.to,
-        });
+      if (!createdNew) {
+        const currentStatus = await repo.getApplicationStatus(applicationId);
+        if (!currentStatus) continue;
+        const plan = planTransition(currentStatus as AppStatus, cls.eventClass);
+        if (plan.action === "promote") {
+          await repo.recordApplicationEvent({
+            applicationId,
+            eventClass: cls.eventClass,
+            emailEventId,
+            fromStatus: currentStatus,
+            toStatus: plan.to,
+            occurredAt: receivedAt,
+            now,
+          });
+          outcome.promoted.push({
+            applicationId,
+            eventClass: cls.eventClass,
+            from: currentStatus,
+            to: plan.to,
+          });
+        }
       }
 
       if (createdNew && cls.eventClass === "assessment_invite") {

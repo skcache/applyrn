@@ -103,10 +103,14 @@ export function extractDeadline(subject: string, snippet: string, now: string): 
   // 1. ISO dates (strongest).
   const iso = combined.match(/(?:deadline|[a-z ]{0,30})\b(\d{4}-\d{2}-\d{2})\b/);
   if (iso?.[1] && CONTEXT.test(iso[0])) {
-    return {
-      deadlineAt: `${iso[1]}T23:59:59.000Z`,
-      source: "explicit_iso",
-    };
+    const ms = Date.parse(`${iso[1]}T23:59:59.000Z`);
+    // Run-3 hardening: explicit ISO dates in the past roll forward a year,
+    // same as the absolute branch ("deadline: 2025-09-01" seen in 2026).
+    let out = `${iso[1]}T23:59:59.000Z`;
+    if (Number.isFinite(nowMs) && ms < nowMs - 86_400_000) {
+      out = new Date(ms + 365 * 86_400_000).toISOString();
+    }
+    return { deadlineAt: out, source: "explicit_iso" };
   }
 
   // 2. Relative days: "within X days", "X days from (the date of) receipt",
