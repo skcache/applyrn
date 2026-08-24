@@ -370,7 +370,8 @@ export class PollService {
           Date.parse(now) - Date.parse(company.createdAt) < CATCHUP_WINDOW_MS;
         const relevance =
           shouldAlert(d) || catchupEligible ? evaluateRelevance(toPersist) : undefined;
-        upserts.push(await this.buildJobRecord(d, toPersist, now, relevance, existingById));
+        const jobRecord = await this.buildJobRecord(d, toPersist, now, relevance, existingById);
+        upserts.push(jobRecord);
         let suppressReopen = false;
         if (d.kind === "reopened") {
           // Reopen cooldown (audit 2026-08-21 §5.8): a repost is alertable
@@ -403,7 +404,7 @@ export class PollService {
             job: toPersist,
             relevance,
             kind: d.kind === "reopened" ? "reopened" : "new",
-            firstSeenAt: toPersist.firstSeenAt,
+            firstSeenAt: jobRecord.firstSeenAt,
           });
         }
       }
