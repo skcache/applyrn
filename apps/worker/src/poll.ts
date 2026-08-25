@@ -369,7 +369,12 @@ export class PollService {
           company.createdAt !== undefined &&
           Date.parse(now) - Date.parse(company.createdAt) < CATCHUP_WINDOW_MS;
         const relevance =
-          shouldAlert(d) || catchupEligible ? evaluateRelevance(toPersist) : undefined;
+          shouldAlert(d) || catchupEligible
+            ? evaluateRelevance({
+                ...toPersist,
+                sourcePublishedAt: toPersist.sourcePublishedAt,
+              })
+            : undefined;
         const jobRecord = await this.buildJobRecord(d, toPersist, now, relevance, existingById);
         upserts.push(jobRecord);
         let suppressReopen = false;

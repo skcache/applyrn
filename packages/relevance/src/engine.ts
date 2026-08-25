@@ -67,6 +67,8 @@ export type RelevanceInput = {
   department?: string;
   team?: string;
   descriptionPlain?: string;
+  /** Board-provided publish time (freshness signal; optional). */
+  sourcePublishedAt?: string;
 };
 
 /** PhD requirement is a hard body-signal regardless of level. */
@@ -516,74 +518,153 @@ function roleFamilyOutOfScope(title: string, department?: string, team?: string)
  * and description contribution is capped so a job description stuffed with
  * buzzwords cannot inflate a role that the title itself does not support.
  */
+/**
+ * 2026-08-25 rescoring (user request: "add more depth to the score out of
+ * 100"). The old additive checklist had a floor of ~70 for every passer
+ * (+30 intern, +30 eng-track, +10 US were guaranteed by the gates), so the
+ * number carried no ranking signal. The redesign keeps the SAME gates and
+ * pass/fail behavior — only the number changes:
+ *
+ *   title relevance   0-40   MAX of matched specificity tiers, not a sum
+ *   skills            0-25   overlap ratio over canonical skill ids
+ *   career level      0-15   explicit markers rank; desc-only marker partial
+ *   freshness         0-10   newer postings score higher (intern-pipeline
+ *                            aware: never punishes early posts hard)
+ *   location          0-10   US+remote > US > hybrid
+ *
+ * Missing descriptions are NEUTRAL (skills default to a modest midpoint from
+ * title alone), not zero — boards that don't serve JDs shouldn't be punished.
+ */
 function scoreRole(input: RelevanceInput): { score: number; reasons: string[] } {
   const reasons: string[] = [];
   let score = 0;
-  let descriptionPoints = 0;
 
+  // --- Title relevance: 0-40, MAX tier wins --------------------------------
+  // Specificity-ordered: an exact family+level title outranks a generic one.
+  const titleLower = input.title.toLowerCase();
+  let titleScore = 12; // passed gates ⇒ some software signal exists in title
+  const trackLabel = engineeringFamilyFor(input.title);
+  if (trackLabel) reasons.push(trackLabel);
+  if (
+    /\b(software|backend|back end|frontend|front end|full[- ]?stack|fullstack|platform|infrastructure|devops|sre|embedded|firmware|machine learning|ml |data engineer|data science|quant)/i.test(
+      titleLower,
+    )
+  ) {
+    titleScore = Math.max(titleScore, 28);
+  }
+  if (
+    /\b(intern|internship|co-?op|new grad|new-grad|graduate engineer|university grad|campus|early career|entry[- ]?level)/i.test(
+      titleLower,
+    )
+  ) {
+    titleScore += 6;
+  }
+  // Strong-skill-in-title is the strongest single relevance signal.
+  const titleSkillHits = TITLE_STRONG_SKILLS.filter((skill) => hasAny(input.title, [skill]));
+  if (titleSkillHits.length > 0) {
+    titleScore = Math.max(titleScore, 34);
+    reasons.push(...titleSkillHits.slice(0, 3).map(friendlySkill));
+  }
+  score += Math.min(40, titleScore);
+
+  // --- Career level: 0-15 ---------------------------------------------------
   const level = earlyCareerMarker(input.title);
   if (level) {
     reasons.push(earlyCareerLabel(level));
-    score += 30;
-  } else if (input.descriptionPlain) {
+    score += 13;
+  } else if (input.descriptionPlain && hasAny(input.descriptionPlain, EARLY_CAREER_MARKERS)) {
     const descLevel = hasAny(input.descriptionPlain, EARLY_CAREER_MARKERS);
     if (descLevel) {
       reasons.push(earlyCareerLabel(descLevel));
-      score += 10;
+      score += 9; // marker only in description → partial credit
     }
   }
 
-  const track = engineeringFamilyFor(input.title);
-  if (track) {
-    reasons.push(track);
-    score += 30;
-  } else if (input.descriptionPlain) {
-    const descTrack = hasAny(input.descriptionPlain, ENGINEERING_TRACK_MARKERS);
-    if (descTrack) {
-      reasons.push("Engineering-related");
-      descriptionPoints += 10;
-    }
-  }
-
-  // Title skills weigh full; description skills are capped at 20 total.
-  const addSkill = (skill: string) => {
-    const label = friendlySkill(skill);
-    if (!reasons.includes(label)) reasons.push(label);
+  // --- Skills: 0-25, canonical overlap ratio -------------------------------
+  // Canonical ids prevent go/golang or ml/machine-learning double-fires.
+  const CANONICAL: Record<string, string> = {
+    go: "golang",
+    ml: "machine learning",
+    "machine learning": "machine learning",
+    js: "javascript",
+    javascript: "javascript",
+    k8s: "kubernetes",
+    kubernetes: "kubernetes",
+    aws: "aws",
+    react: "react",
+    python: "python",
+    typescript: "typescript",
+    java: "java",
+    rust: "rust",
+    cpp: "c++",
+    "c++": "c++",
+    sql: "sql",
+    docker: "docker",
   };
-  for (const skill of TITLE_STRONG_SKILLS) {
-    if (hasAny(input.title, [skill])) {
-      addSkill(skill);
-      score += 15;
-    }
+  const hitCanonical = new Set<string>();
+  for (const skill of titleSkillHits) {
+    const key = skill.toLowerCase();
+    hitCanonical.add(CANONICAL[key] ?? key);
   }
   if (input.descriptionPlain) {
     for (const skill of DESCRIPTION_STRONG_SKILLS) {
-      if (hasAny(input.descriptionPlain, [skill])) {
-        addSkill(skill);
-        descriptionPoints += 5;
+      const label = friendlySkill(skill);
+      if (!reasons.includes(label) && hasAny(input.descriptionPlain, [skill])) {
+        const key = skill.toLowerCase();
+        const canon = CANONICAL[key] ?? key;
+        if (!hitCanonical.has(canon)) {
+          hitCanonical.add(canon);
+          if (reasons.filter((r) => r === label).length === 0) reasons.push(label);
+        }
       }
     }
   }
-  descriptionPoints = Math.min(descriptionPoints, 20);
+  // Overlap ratio against a 6-skill expectation: 1 unique skill ≈ 8,
+  // 2 ≈ 14, 3 ≈ 19, 4+ ≈ 23-25. Saturating, so keyword walls can't buy score.
+  const uniq = hitCanonical.size;
+  const skillScore = uniq === 0 ? 6 : Math.min(25, 4 + uniq * 7);
+  if (uniq >= 3 && !reasons.includes("Multi-stack")) reasons.push("Multi-stack");
+  score += skillScore;
 
-  // Location: US base + remote.
+  // --- Freshness: 0-10 -------------------------------------------------------
+  // Intern-pipeline aware: a posting for next summer is NOT stale today.
+  // Base 6 for everything (gates already bound volume); +4 when the board
+  // published it within the last 21 days.
+  let freshScore = 6;
+  const published = input.sourcePublishedAt ? Date.parse(input.sourcePublishedAt) : NaN;
+  const nowMs = Date.now();
+  if (Number.isFinite(published) && Number.isFinite(nowMs)) {
+    const ageDays = (nowMs - published) / 86_400_000;
+    if (ageDays <= 3) freshScore = 10;
+    else if (ageDays <= 7) freshScore = 9;
+    else if (ageDays <= 21) freshScore = 8;
+    else if (ageDays <= 45) freshScore = 6;
+    else freshScore = 4; // old but intern pipelines recycle — mild penalty only
+    if (freshScore >= 9 && !reasons.includes("Fresh")) reasons.push("Fresh");
+  }
+  score += freshScore;
+
+  // --- Location: 0-10 ---------------------------------------------------------
   const locationText = (input.location ?? "").toLowerCase();
   if (looksUS(input.location) && /remote/.test(locationText)) {
-    reasons.push("Remote");
+    reasons.push("Remote (US)");
     score += 10;
   } else if (looksUS(input.location)) {
     reasons.push("US");
-    score += 10;
+    score += 8;
+    if (/(san francisco|new york|seattle|austin|boston|los angeles)/i.test(locationText)) {
+      reasons.push("Major tech hub");
+      score += 2;
+    }
   } else if (/remote/.test(locationText)) {
-    // Non-US remote is gated earlier; this branch is defense-in-depth.
     reasons.push("Remote");
-    descriptionPoints += 5;
+    score += 6;
   } else if (hasAny(locationText, ["hybrid", "in-office", "on-site"])) {
     reasons.push("US");
-    score += 5;
+    score += 6;
   }
 
-  return { score: Math.min(100, score + descriptionPoints), reasons };
+  return { score: Math.min(100, Math.round(score)), reasons };
 }
 
 export function evaluateRelevance(
