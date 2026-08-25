@@ -404,6 +404,18 @@ export const NON_SOFTWARE_DISCIPLINES = [
   "structural",
   "bridge",
   "highway",
+  // 2026-08-25 user report: water/energy civil roles alerted via bare
+  // "engineering". These physical-world disciplines win over it.
+  "water resources",
+  "water/wastewater",
+  "wastewater",
+  "reservoir",
+  "subsurface",
+  "drilling",
+  "geotechnical",
+  "transportation engineering",
+  "traffic engineering",
+  "traffic",
   "mechanical",
   "electrical",
   // Hardware EE is out; embedded SOFTWARE stays reachable via
@@ -537,6 +549,30 @@ export const NON_ENGINEERING_ROLE_MARKERS = [
   // engineering-track SWE/infra — a "Technical Support Engineer", "Solutions
   // Engineer" (presales), "Field Engineer", or "Escalations Engineer" carries
   // "engineer" but is a support/services role, exactly like a Sales Engineer.
+  // Civil / mechanical / physical-world engineering (2026-08-25 user report:
+  // "Water Resources Engineering Intern" alerted). Bare "engineering" is an
+  // in-scope marker, so these disciplines must WIN over it — same precedence
+  // as sales/marketing above.
+  "civil engineer",
+  "structural engineer",
+  "water resources",
+  "wastewater",
+  "water/wastewater",
+  "reservoir engineer",
+  "subsurface",
+  "petroleum engineer",
+  "drilling engineer",
+  "chemical engineer",
+  "process engineer",
+  "mechanical engineer",
+  "aerospace engineer",
+  "environmental engineer",
+  "transportation engineer",
+  "traffic engineer",
+  "traffic engineering",
+  "civil engineering",
+  "geotechnical",
+  "surveyor",
   "support engineer",
   "technical support",
   "technical services",
