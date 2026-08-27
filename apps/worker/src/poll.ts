@@ -427,7 +427,13 @@ export class PollService {
       await this.repo.recordSourceSuccess(company.id, now, 200, String(fetched.length));
       outcome.ok = true;
       outcome.newJobs = alertable.length;
-      outcome.alertsSent = await this.notifyNew(company, alertable, now, budget);
+      // Rank in-scope alerts best-fit-first so the per-company FIFO cap of 5
+      // keeps the highest-relevance roles (not first-come-first-served). Does
+      // NOT change filtering — only ordering within the already-in-scope set.
+      const ranked = [...alertable].sort(
+        (a, b) => (b.relevance?.score ?? 0) - (a.relevance?.score ?? 0),
+      );
+      outcome.alertsSent = await this.notifyNew(company, ranked, now, budget);
       return outcome;
     } catch {
       outcome.errorCode = "persist_error";

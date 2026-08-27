@@ -594,7 +594,10 @@ export const NON_ENGINEERING_ROLE_MARKERS = [
   "implementation",
   "onboarding",
   "solutions consultant",
-  "analyst",
+  // NOTE: bare "analyst" removed 2026-08-26 — it wrongly suppressed real
+  // engineering-analytic roles ("Data Analyst Engineer Intern", "ML Analyst
+  // Intern"). The explicit non-eng analyst markers below remain; in-scope
+  // "analyst" titles must carry a software signal (data/ml/engineer) to pass.
   "accountant",
   "auditor",
   "business analyst",

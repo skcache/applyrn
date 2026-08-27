@@ -475,11 +475,51 @@ function statedMaxYears(input: RelevanceInput): number | null {
  * "Store Executive Intern" or "Culinary Service Associate" has none and is
  * suppressed even though its description says "university"/"student".
  */
+/**
+ * Positive software-signal check used by both the gate and the scorer.
+ *
+ * 2026-08-26 fix (gate-leakage audit): the bare "engineer"/"engineering"
+ * tokens are NO LONGER a positive signal by themselves. Previously
+ * `engineeringFamilyFor` returned truthy for any "Engineer"/"Engineering"
+ * title, so "Materials Engineering Intern" / "Nuclear Engineer I" passed the
+ * role-family gate on the generic word alone — leaking ~30% of live alerts
+ * (physical-world engineering). A title now needs an EXPLICIT software-family
+ * word (software/data/ml/backend/frontend/swe/developer/infra/systems/
+ * embedded/quant) OR a strong tech skill (python/react/go/...) to count as
+ * in-scope. "Embedded Software Engineer" still passes; "Hardware Engineer
+ * Intern" no longer does.
+ */
 function titleHasSoftwareSignal(title: string): string | null {
-  if (engineeringFamilyFor(title)) return engineeringFamilyFor(title);
+  // An explicit software-family word wins (every entry in
+  // ENGINEERING_TRACK_MARKERS EXCEPT the generic "engineer"/"engineering"
+  // tokens). The bare "engineer"/"engineering" tokens are deliberately NOT a
+  // signal here — 2026-08-26 fix for ~30% gate-leakage (physical-world
+  // engineering roles like "Materials Engineering Intern" rode the generic
+  // word into scope). So "Software/Backend/Data/ML/Embedded/Computer Vision
+  // Engineering Intern" passes; "Hardware/Materials/Nuclear Engineering
+  // Intern" does not.
+  const EXPLICIT_FAMILY = ENGINEERING_TRACK_MARKERS.filter(
+    (m) => m !== "engineer" && m !== "engineering",
+  );
+  // Add computer-vision / robotics / graphics tracks (core SWE/ML, but not
+  // in the generic marker list).
+  const FAMILY_EXTRA = [
+    "computer vision",
+    "cv",
+    "robotics",
+    "graphics",
+    "algorithm",
+    "deep learning",
+    "neural",
+    "compiler",
+    "distributed systems",
+    "reliability", // Site Reliability Engineer — unambiguous SWE infra
+  ];
+  if (hasAny(title, [...EXPLICIT_FAMILY, ...FAMILY_EXTRA])) return "software family";
   // Real tech skills in the title also count ("Python Developer Intern",
   // "React Engineer Intern").
-  return hasAny(title, TITLE_STRONG_SKILLS);
+  const skill = hasAny(title, TITLE_STRONG_SKILLS);
+  return skill ? "strong skill" : null;
 }
 
 function roleFamilyOutOfScope(title: string, department?: string, team?: string): string | null {
@@ -506,6 +546,9 @@ function roleFamilyOutOfScope(title: string, department?: string, team?: string)
       "ml engineer",
       "firmware",
     ]);
+    // "engineer"/"engineering" alone is NOT a software signal (2026-08-26 fix);
+    // a discipline hit must win unless a specific software-family word above
+    // is present, so "Materials Engineering Intern" is suppressed.
     if (!explicitSoftwareWord) return "non-software engineering discipline";
   }
   const roleText = (department ? `${title} ${department}` : title) + (team ? ` ${team}` : "");
