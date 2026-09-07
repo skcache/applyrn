@@ -17,10 +17,12 @@ name: Poll (redundant trigger)
 # <= 40 companies), so this workflow reads shardCount from /api/status and
 # polls every shard — a fixed 0/1 pair would silently skip shards 2+ once
 # the watchlist crosses ~80 companies.
+#
+# TEMPORARILY PAUSED: scheduled execution is disabled while ApplyRN is not
+# under active development. Keep workflow_dispatch so the fallback can be
+# run manually and the cron can be restored without rebuilding this workflow.
 
 on:
-  schedule:
-    - cron: "*/5 * * * *" # every 5 minutes
   workflow_dispatch:
 
 permissions:
