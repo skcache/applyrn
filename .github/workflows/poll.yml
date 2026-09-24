@@ -8,8 +8,8 @@ name: Poll (redundant trigger)
 #
 # Fallback semantics: each run first checks /api/status.lastPollAt. If a
 # cycle completed recently (the primary Cloudflare cron is healthy — it
-# fires every 12 minutes and every firing writes a heartbeat row), the run
-# stands down. Only when cycles are stale (> 30 minutes: two-plus missed
+# fires every 10 minutes and every firing writes a heartbeat row), the run
+# stands down. Only when cycles are stale (> 30 minutes: three missed
 # firings) does it poll the watchlist, so the triggers never overlap and
 # double-fire the same companies. The 30-minute threshold mirrors
 # TICK_STALENESS_SECONDS in apps/worker/src/index.ts.

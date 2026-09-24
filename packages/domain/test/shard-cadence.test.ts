@@ -8,8 +8,9 @@ import { CRON_INTERVAL_MINUTES, companyShard, minuteShard, shardCountFor } from 
  *
  * The primary cron fires every CRON_INTERVAL_MINUTES and each firing runs
  * exactly ONE shard, so every company is polled once per
- * CRON_INTERVAL_MINUTES x shardCount — 12 x 5 = 60 minutes at the current
- * 154-company watchlist. Two invariants keep that promise honest:
+ * CRON_INTERVAL_MINUTES x shardCount — 10 x 7 = 70 minutes at the current
+ * 226-company prod watchlist (shardCount 7, worst bucket 40). Two
+ * invariants keep that promise honest:
  *
  *   1. the wrangler.toml cron step matches CRON_INTERVAL_MINUTES (the
  *      rotation assumes exactly one firing per slot)

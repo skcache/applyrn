@@ -17,17 +17,18 @@ export const MAX_FETCHES_PER_INVOCATION = 40;
 /**
  * Primary cron firing interval in minutes (cadence change 2026-09-23).
  *
- * MUST match the `crons` expression in apps/worker/wrangler.toml (five
- * firings per hour, one every 12 minutes). Each firing handles ONE shard, so
+ * MUST match the `crons` expression in apps/worker/wrangler.toml (six
+ * firings per hour, one every 10 minutes). Each firing handles ONE shard, so
  * a company is polled once per CRON_INTERVAL_MINUTES x shardCount — with the
- * current 154-company watchlist (shardCount 5) that is exactly 60 minutes per
- * company (previously ~2 minutes), and invocation volume drops 1440 -> 120
- * per day. If the watchlist grows, shardCountFor raises the shard count and
- * the realized cadence stretches in step (12 x k minutes); the per-company
- * poll_interval_seconds gate (3600) is the hard floor that keeps any extra
- * trigger (pinger, GitHub fallback) from polling a company early.
+ * current 226-company prod watchlist (shardCount 7, worst bucket 40) that is
+ * 70 minutes per company (previously ~5 minutes), and invocation volume
+ * drops 1440 -> 144 per day. shardCountFor raises the shard count as the
+ * watchlist grows, so the realized cadence stretches in step
+ * (10 x k minutes); the per-company poll_interval_seconds gate (3600) is the
+ * hard floor that keeps any extra trigger (pinger, GitHub fallback) from
+ * polling a company early.
  */
-export const CRON_INTERVAL_MINUTES = 12;
+export const CRON_INTERVAL_MINUTES = 10;
 
 /**
  * Smallest shard count whose worst hash bucket fits the per-invocation

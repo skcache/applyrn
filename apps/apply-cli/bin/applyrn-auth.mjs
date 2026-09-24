@@ -123,7 +123,7 @@ async function finish(code) {
     });
     if (!wr.ok) die(`worker rejected token: HTTP ${wr.status} ${await wr.text()}`);
     console.log(
-      "✅ Gmail linked. The worker polls Gmail with every poll cycle (~every 12 minutes).",
+      "✅ Gmail linked. The worker polls Gmail with every poll cycle (~every 10 minutes).",
     );
     console.log(`   scope granted: ${tok.scope}`);
   } catch (err) {

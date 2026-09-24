@@ -34,8 +34,8 @@ const OBSERVABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 /**
  * /api/tick stand-down window: if the last completed cycle is fresher than
  * this, an external pinger does nothing (the primary cron is healthy).
- * 1800s (30 min) is 2.5 missed 12-min firings: comfortably above the normal
- * heartbeat gap (~12 min) so the 5-min pinger never double-drives cycles,
+ * 1800s (30 min) is 3 missed 10-min firings: comfortably above the normal
+ * heartbeat gap (~10 min) so the 5-min pinger never double-drives cycles,
  * comfortably below an hour so a dead primary cron still gets covered
  * within ~35 minutes.
  */
@@ -127,9 +127,9 @@ export default {
         }),
     );
     // V3 §1: Gmail outcome poll rides the same cron, on every firing
-    // (~every 12 minutes — same cadence as the original 10-minute phase
+    // (~every 10 minutes — the same cadence as the original 10-minute phase
     // gate, which existed for the 1-minute cron era; it is redundant at
-    // 12-minute firings). Skipped silently when GOOGLE_CLIENT_ID is not
+    // 10-minute firings). Skipped silently when GOOGLE_CLIENT_ID is not
     // configured (feature flag by absence of secrets — nothing else to flip).
     // Run-3/C3: defer the Gmail poll when this cron invocation already ran a
     // heavy shard cycle (deferredN > 0 means the 50-subrequest wall was near).

@@ -66,9 +66,9 @@ export { CRON_INTERVAL_MINUTES, companyShard, minuteShard, shardCountFor } from 
 
 /**
  * Scheduler is considered stale when no cycle finished within this window.
- * Cadence is hourly: the primary cron fires every 12 minutes (each firing
- * covers one of 5 shards) and EVERY invocation writes a heartbeat metrics
- * row, so a healthy system gaps at most ~12 minutes. 60 minutes = 5 missed
+ * Cadence is hourly: the primary cron fires every 10 minutes (each firing
+ * covers one of 7 shards) and EVERY invocation writes a heartbeat metrics
+ * row, so a healthy system gaps at most ~10 minutes. 60 minutes = 6 missed
  * firings, and the two fallback triggers (GitHub Actions ~5-min checks,
  * cron-job.org pinger) only add cycles — a 60-minute gap means the primary
  * cron AND both fallbacks are down (PRD Issue 11 heartbeat).
@@ -134,8 +134,8 @@ export class PollScheduler implements Poller {
     // every FIRING SLOT (cron fires every CRON_INTERVAL_MINUTES), so shard 0
     // is covered on slot 0, shard 1 on slot 1, ... and shard k-1 back to
     // shard 0 on slot k. Every company therefore keeps a
-    // CRON_INTERVAL_MINUTES x shardCount cadence — 12 x 5 = 60 minutes at
-    // today's 154-company watchlist — while each invocation stays within
+    // CRON_INTERVAL_MINUTES x shardCount cadence — 10 x 7 = 70 minutes at
+    // the current 226-company watchlist — while each invocation stays within
     // MAX_FETCHES_PER_INVOCATION.
     // An explicit `shard` (from an external fallback trigger such as a
     // GitHub Actions poller) overrides the slot rotation so a coarser
