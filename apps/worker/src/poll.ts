@@ -74,8 +74,9 @@ export const REOPEN_COOLDOWN_MS = 6 * 60 * 60 * 1000;
  * Audit 2026-08-22 V9: max NEW-job alerts one company may raise per cycle.
  * Boards minting rotating externalJobIds bypass every same-id guard, so
  * this caps the spam ceiling; overflow still persists to the dashboard
- * silently. A legitimate board never posts >5 genuinely new roles in a
- * single 2-minute window.
+ * silently. Polls are hourly (cadence change 2026-09-23): 5 new roles in
+ * one poll window is already a burst; a legitimately bigger wave still
+ * shows on the dashboard, just without a phone ping per role.
  */
 export const MAX_NEW_ALERTS_PER_COMPANY_PER_CYCLE = 5;
 

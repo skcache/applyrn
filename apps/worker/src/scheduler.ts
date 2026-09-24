@@ -1,12 +1,14 @@
 import type { CompanyConfig } from "@applyrn/domain";
-import { companyShard, minuteShard, shardCountFor } from "@applyrn/domain";
+import { CRON_INTERVAL_MINUTES, companyShard, minuteShard, shardCountFor } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
 import type { PollOutcome } from "./poll.js";
 import { FetchBudget } from "./poll.js";
 import { log } from "./logger.js";
 
 /**
- * Poll scheduler: the two-minute cycle (PRD section 2.3 / Issue 5).
+ * Poll scheduler: the hourly cycle (PRD section 2.3 / Issue 5; cadence
+ * retuned 2026-09-23 from ~2 minutes to 1 hour per company to cut
+ * Cloudflare request volume — the sharded topology is unchanged).
  *
  * Responsibilities:
  * - load enabled companies
@@ -60,15 +62,18 @@ export const MAX_FETCHES_PER_INVOCATION = 40;
 // (audit 2026-08-22 W2): repo.ts's getSystemStatus and the scheduler MUST
 // agree on the shard count or the fallback triggers under-cover tail
 // buckets. Re-exported here so existing imports keep working.
-export { companyShard, minuteShard, shardCountFor } from "@applyrn/domain";
+export { CRON_INTERVAL_MINUTES, companyShard, minuteShard, shardCountFor } from "@applyrn/domain";
 
 /**
  * Scheduler is considered stale when no cycle finished within this window.
- * Cadence is 2 minutes, so 15 minutes = 7 missed cycles (PRD Issue 11
- * heartbeat; catches a dead cron without false positives during quiet nights
- * where every company is in backoff).
+ * Cadence is hourly: the primary cron fires every 12 minutes (each firing
+ * covers one of 5 shards) and EVERY invocation writes a heartbeat metrics
+ * row, so a healthy system gaps at most ~12 minutes. 60 minutes = 5 missed
+ * firings, and the two fallback triggers (GitHub Actions ~5-min checks,
+ * cron-job.org pinger) only add cycles — a 60-minute gap means the primary
+ * cron AND both fallbacks are down (PRD Issue 11 heartbeat).
  */
-export const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
+export const HEARTBEAT_STALE_MS = 60 * 60 * 1000;
 
 /** Human-readable duration for stale-incident messages. */
 export function formatAgeMs(ms: number): string {
@@ -125,17 +130,20 @@ export class PollScheduler implements Poller {
     const shardCount = shardCountFor(companies);
 
     // Shard the watchlist across invocations (free-plan subrequest cap).
-    // Companies are bucketed stably by id; the shard that runs rotates
-    // every minute, so a company in shard 0 is polled on even minutes and
-    // shard 1 on odd minutes -> every company keeps a ~2-minute cadence
-    // while each invocation stays within MAX_FETCHES_PER_INVOCATION.
+    // Companies are bucketed stably by id; the shard that runs rotates with
+    // every FIRING SLOT (cron fires every CRON_INTERVAL_MINUTES), so shard 0
+    // is covered on slot 0, shard 1 on slot 1, ... and shard k-1 back to
+    // shard 0 on slot k. Every company therefore keeps a
+    // CRON_INTERVAL_MINUTES x shardCount cadence — 12 x 5 = 60 minutes at
+    // today's 154-company watchlist — while each invocation stays within
+    // MAX_FETCHES_PER_INVOCATION.
     // An explicit `shard` (from an external fallback trigger such as a
-    // GitHub Actions poller) overrides the minute rotation so a coarser
+    // GitHub Actions poller) overrides the slot rotation so a coarser
     // schedule can still cover every shard deterministically.
     const shard =
       opts?.shard !== undefined && opts.shard >= 0 && opts.shard < shardCount
         ? opts.shard
-        : minuteShard(now, shardCount);
+        : minuteShard(now, shardCount, CRON_INTERVAL_MINUTES);
     const candidates = companies.filter((c) => companyShard(c.id, shardCount) === shard);
 
     const due: CompanyConfig[] = [];

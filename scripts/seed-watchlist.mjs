@@ -44,7 +44,7 @@ function sqlFor(companies) {
       `'${String(c.provider).replaceAll("'", "''")}', ` +
       `'${String(c.boardKey ?? c.id).replaceAll("'", "''")}', ` +
       `${c.enabled === false ? 0 : 1}, ` +
-      `${Number(c.pollIntervalSeconds ?? 120)}, ` +
+      `${Number(c.pollIntervalSeconds ?? 3600)}, ` +
       `'${tags ?? ""}', ` +
       `'${String(createdAt).replaceAll("'", "''")}')`
     );

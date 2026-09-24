@@ -1,0 +1,14 @@
+-- Cadence change 2026-09-23: look at jobs every 1 hour instead of ~2 minutes
+-- (Cloudflare request volume — the founder's call).
+--
+-- The scheduler's per-company due gate reads poll_interval_seconds. The
+-- primary cron rotation alone already spaces each shard's visits ~60 minutes
+-- apart; this interval is the hard floor that stops the fallback triggers
+-- (cron-job.org pinger, GitHub Actions) from polling a company early when
+-- they do fire.
+--
+-- The 0001 column DEFAULT (120) is left as-is: D1 cannot alter a column
+-- default without a table rebuild, and every real row arrives with an
+-- explicit value from the seeder (scripts/seed-watchlist.mjs, now defaulting
+-- to 3600), so it has no effect in practice.
+UPDATE companies SET poll_interval_seconds = 3600;

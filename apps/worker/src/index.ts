@@ -8,6 +8,7 @@ import {
 } from "@applyrn/adapters";
 import type { JobSourceAdapter } from "@applyrn/adapters";
 import type { ApplicationStatus } from "@applyrn/domain";
+import { CRON_INTERVAL_MINUTES, minuteShard } from "@applyrn/domain";
 import { D1Repository } from "./repo.js";
 import { PollService, SUBREQUEST_LIMIT_PER_INVOCATION, type WorkerEnv } from "./poll.js";
 import { PollScheduler } from "./scheduler.js";
@@ -33,10 +34,12 @@ const OBSERVABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 /**
  * /api/tick stand-down window: if the last completed cycle is fresher than
  * this, an external pinger does nothing (the primary cron is healthy).
- * 180s mirrors the GH fallback's staleness threshold — comfortably above
- * the 2-min per-shard cadence, comfortably below the 5-min pinger period.
+ * 1800s (30 min) is 2.5 missed 12-min firings: comfortably above the normal
+ * heartbeat gap (~12 min) so the 5-min pinger never double-drives cycles,
+ * comfortably below an hour so a dead primary cron still gets covered
+ * within ~35 minutes.
  */
-const TICK_STALENESS_SECONDS = 180;
+const TICK_STALENESS_SECONDS = 1800;
 
 /**
  * V0 access control (PRD 14): a single shared token. Data/mutating
@@ -123,18 +126,15 @@ export default {
           }
         }),
     );
-    // V3 §1: Gmail outcome poll rides the same cron, phase-gated to ~every
-    // 10 minutes. Skipped silently when GOOGLE_CLIENT_ID is not configured
-    // (feature flag by absence of secrets — nothing else to flip).
+    // V3 §1: Gmail outcome poll rides the same cron, on every firing
+    // (~every 12 minutes — same cadence as the original 10-minute phase
+    // gate, which existed for the 1-minute cron era; it is redundant at
+    // 12-minute firings). Skipped silently when GOOGLE_CLIENT_ID is not
+    // configured (feature flag by absence of secrets — nothing else to flip).
     // Run-3/C3: defer the Gmail poll when this cron invocation already ran a
     // heavy shard cycle (deferredN > 0 means the 50-subrequest wall was near).
-    // The next 10-min tick picks it up — email polling tolerates 10-min gaps.
-    if (
-      env.GOOGLE_CLIENT_ID &&
-      env.GOOGLE_CLIENT_SECRET &&
-      new Date().getUTCMinutes() % 10 === 0 &&
-      !gmailDeferredThisTick
-    ) {
+    // The next firing picks it up — email polling tolerates a missed tick.
+    if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && !gmailDeferredThisTick) {
       const repo = new D1Repository(env.DB);
       const gmailEnv = {
         GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
@@ -326,7 +326,13 @@ export default {
       const shardKey =
         shard !== undefined && shard >= 0 && shard < status.shardCount
           ? String(shard)
-          : String(Math.floor(Date.now() / 60_000) % Math.max(1, status.shardCount));
+          : String(
+              minuteShard(
+                new Date().toISOString(),
+                Math.max(1, status.shardCount),
+                CRON_INTERVAL_MINUTES,
+              ),
+            );
       const lastShardPollAt = await repo.getLastShardPollAt(shardKey);
       const ageSec = lastShardPollAt
         ? (Date.now() - Date.parse(lastShardPollAt)) / 1000

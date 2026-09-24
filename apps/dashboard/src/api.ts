@@ -220,3 +220,10 @@ export function ageLabel(iso: string, now: number = Date.now()): string {
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
 }
+
+/** Poll cadence like "1h", "30m", "45s" — shown next to the source count. */
+export function cadenceLabel(seconds: number): string {
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}

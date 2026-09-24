@@ -122,7 +122,9 @@ async function finish(code) {
       body: JSON.stringify({ refreshToken: tok.refresh_token, scope: tok.scope ?? SCOPE }),
     });
     if (!wr.ok) die(`worker rejected token: HTTP ${wr.status} ${await wr.text()}`);
-    console.log("✅ Gmail linked. The worker will poll every ~10 minutes.");
+    console.log(
+      "✅ Gmail linked. The worker polls Gmail with every poll cycle (~every 12 minutes).",
+    );
     console.log(`   scope granted: ${tok.scope}`);
   } catch (err) {
     die(err.message);

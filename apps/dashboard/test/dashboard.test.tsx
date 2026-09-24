@@ -60,7 +60,7 @@ describe("App gate", () => {
         const path = String(url);
         if (path.endsWith("/api/status")) {
           return json({
-            status: { companyCount: 1, cadenceSeconds: 120, lastPollAt: "2026-08-14T16:59:42Z" },
+            status: { companyCount: 1, cadenceSeconds: 3600, lastPollAt: "2026-08-14T16:59:42Z" },
           });
         }
         if (path.endsWith("/api/metrics")) {
@@ -122,7 +122,7 @@ describe("App gate", () => {
     expect(screen.getByText("Example AI")).toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(screen.getByText(/1 sources/i)).toBeInTheDocument();
-    expect(screen.getByText(/120s/)).toBeInTheDocument();
+    expect(screen.getByText(/1h/)).toBeInTheDocument();
     expect(screen.getByText(/last poll/i)).toBeInTheDocument();
     expect(screen.getByText(/720 cycles/i)).toBeInTheDocument();
     expect(screen.getByText(/410ms/)).toBeInTheDocument();

@@ -15,6 +15,21 @@
 export const MAX_FETCHES_PER_INVOCATION = 40;
 
 /**
+ * Primary cron firing interval in minutes (cadence change 2026-09-23).
+ *
+ * MUST match the `crons` expression in apps/worker/wrangler.toml (five
+ * firings per hour, one every 12 minutes). Each firing handles ONE shard, so
+ * a company is polled once per CRON_INTERVAL_MINUTES x shardCount — with the
+ * current 154-company watchlist (shardCount 5) that is exactly 60 minutes per
+ * company (previously ~2 minutes), and invocation volume drops 1440 -> 120
+ * per day. If the watchlist grows, shardCountFor raises the shard count and
+ * the realized cadence stretches in step (12 x k minutes); the per-company
+ * poll_interval_seconds gate (3600) is the hard floor that keeps any extra
+ * trigger (pinger, GitHub fallback) from polling a company early.
+ */
+export const CRON_INTERVAL_MINUTES = 12;
+
+/**
  * Smallest shard count whose worst hash bucket fits the per-invocation
  * fetch budget. ceil(n / MAX) is a lower bound but NOT a guarantee: the
  * company-id hash is imperfect and can overfill a bucket (measured: 160
@@ -45,7 +60,16 @@ export function companyShard(companyId: string, shardCount: number): number {
   return h % shardCount;
 }
 
-/** Which shard runs on this minute; 1-min cron rotates shards round-robin. */
-export function minuteShard(now: string, shardCount: number): number {
-  return Math.floor(new Date(now).getTime() / 60_000) % shardCount;
+/**
+ * Which shard runs in this cron firing slot. Rotation is by firing SLOT,
+ * not by wall-clock minute, so every shard is visited once per shardCount
+ * firings at ANY cron period: consecutive firings advance the slot by one
+ * and `slot % shardCount` cycles through all buckets. A naive minute-based
+ * rotation pins a single shard forever when the cron only fires on exact
+ * hour multiples (an hourly cron always evaluates minute 0).
+ *
+ * `periodMinutes` is the cron firing interval in minutes.
+ */
+export function minuteShard(now: string, shardCount: number, periodMinutes = 1): number {
+  return Math.floor(new Date(now).getTime() / (60_000 * periodMinutes)) % shardCount;
 }

@@ -3,6 +3,7 @@ import {
   APPLICATION_STATUSES,
   ageLabel,
   api,
+  cadenceLabel,
   clearToken,
   getToken,
   isSafeHttpUrl,
@@ -462,7 +463,7 @@ function Hero({
   metrics: ObservabilityMetrics | undefined;
   now: number;
 }) {
-  const stale = sys?.lastPollAt ? Date.now() - Date.parse(sys.lastPollAt) > 5 * 60 * 1000 : false;
+  const stale = sys?.lastPollAt ? Date.now() - Date.parse(sys.lastPollAt) > 30 * 60 * 1000 : false;
   const failureTotal = metrics?.alertFailures.reduce((s, f) => s + f.n, 0) ?? 0;
   return (
     <div className="hero">
@@ -476,13 +477,13 @@ function Hero({
         </h1>
         <div className="lg:justify-self-end lg:pb-2 lg:text-right">
           <p className="hero-meta">
-            Your feeds, checked every two minutes. New openings get flagged when they appear.
+            Your feeds, checked every hour. New openings get flagged when they appear.
           </p>
           <div className="mt-8 space-y-2">
             <p className="live-line">Live</p>
             <p className="text-[15px]" style={{ color: "var(--text-2)" }}>
               {sys ? `${sys.companyCount} sources` : "…"} ·{" "}
-              <span className="mono">{sys ? `${sys.cadenceSeconds}s` : "120s"}</span>
+              <span className="mono">{sys ? cadenceLabel(sys.cadenceSeconds) : "1h"}</span>
             </p>
             <p
               className="mono text-[14px]"

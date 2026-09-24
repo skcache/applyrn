@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { D1Repository, lifetimeMs, percentile } from "../src/repo.js";
 import {
+  CRON_INTERVAL_MINUTES,
   HEARTBEAT_STALE_MS,
   MAX_FETCHES_PER_INVOCATION,
   PollScheduler,
@@ -312,7 +313,7 @@ describe("scheduler staleness heartbeat", () => {
     const stub = new StubPoller();
     const scheduler = new PollScheduler(repo(), stub as never);
 
-    // First run: stale (last cycle finished > 15 min ago) -> DB incident, NO alert.
+    // First run: stale (last cycle finished > HEARTBEAT_STALE_MS ago) -> DB incident, NO alert.
     await scheduler.runCycle(realNow);
     expect(await repo().getOpenSystemEvent("scheduler-stale")).not.toBeNull();
     expect(stub.sendSystemAlert).not.toHaveBeenCalled();
@@ -346,22 +347,27 @@ describe("watchlist sharding (free-plan subrequest cap)", () => {
     sendSystemAlert = vi.fn(async () => true);
   }
 
-  it("buckets companies stably and rotates which shard runs each minute", () => {
-    // Same id always lands in the same bucket; two consecutive minutes
-    // alternate. ShardCount is computed from the watchlist size.
+  it("buckets companies stably and rotates which shard runs each firing slot", () => {
+    // Same id always lands in the same bucket; consecutive 12-minute firing
+    // slots advance to the next shard. ShardCount is computed from the
+    // watchlist size.
     const ids = Array.from({ length: 63 }, (_, i) => `company-${String(i).padStart(2, "0")}`);
-    const shardCount = Math.max(1, Math.ceil(ids.length / MAX_FETCHES_PER_INVOCATION));
+    const shardCount = shardCountFor(ids.map((id) => ({ id })));
     expect(shardCount).toBe(2);
     for (const id of ids) expect(companyShard(id, shardCount)).toBe(companyShard(id, shardCount));
-    const evenMinute = "2026-08-15T12:00:00.000Z";
-    const oddMinute = "2026-08-15T12:01:00.000Z";
-    expect(minuteShard(evenMinute, shardCount)).not.toBe(minuteShard(oddMinute, shardCount));
-    expect([0, 1]).toContain(minuteShard(evenMinute, shardCount));
+    const slot0 = "2026-08-15T12:00:00.000Z";
+    const slot1 = "2026-08-15T12:12:00.000Z";
+    expect(minuteShard(slot0, shardCount, CRON_INTERVAL_MINUTES)).not.toBe(
+      minuteShard(slot1, shardCount, CRON_INTERVAL_MINUTES),
+    );
+    expect([0, 1]).toContain(minuteShard(slot0, shardCount, CRON_INTERVAL_MINUTES));
   });
 
-  it("polls only the active shard in a cycle, and every company across two minutes", async () => {
+  it("polls only the active shard in a cycle, and every company across the shard rotation", async () => {
     // 63 companies => 2 shards => ~32 fetches per invocation (under the 50
-    // subrequest cap). Every company is still polled every 2 minutes.
+    // subrequest cap). Every company is polled once per rotation
+    // (CRON_INTERVAL_MINUTES x shardCount = 24 minutes here; 60 minutes at
+    // the prod watchlist's 5 shards).
     await env.DB.prepare("DELETE FROM companies").run();
     for (let i = 0; i < 63; i++) {
       await seedCompany({
@@ -373,21 +379,35 @@ describe("watchlist sharding (free-plan subrequest cap)", () => {
     }
     const poller = new RecordPoller();
     const scheduler = new PollScheduler(repo(), poller as never);
+    const ids = Array.from({ length: 63 }, (_, i) => `company-${String(i).padStart(2, "0")}`);
+    const shardCount = shardCountFor(ids.map((id) => ({ id })));
+    const base = Date.parse("2026-08-15T12:00:00.000Z");
 
-    await scheduler.runCycle("2026-08-15T12:00:00.000Z");
-    const first = [...poller.polled];
-    expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThan(63); // never the whole watchlist in one go
-    expect(first.length).toBeLessThanOrEqual(MAX_FETCHES_PER_INVOCATION);
+    const polledPerSlot: string[][] = [];
+    for (let slot = 0; slot < shardCount; slot++) {
+      poller.polled.length = 0;
+      await scheduler.runCycle(
+        new Date(base + slot * CRON_INTERVAL_MINUTES * 60_000).toISOString(),
+      );
+      polledPerSlot.push([...poller.polled]);
+    }
 
-    poller.polled.length = 0;
-    await scheduler.runCycle("2026-08-15T12:01:00.000Z");
-    const second = [...poller.polled];
-    expect(second.length).toBeGreaterThan(0);
-    // Union covers the whole watchlist across the two rotations.
-    expect(new Set([...first, ...second]).size).toBe(63);
-    // Shards are disjoint.
-    for (const id of first) expect(second).not.toContain(id);
+    // Each firing covers exactly one shard: never the whole watchlist, never
+    // more than the per-invocation fetch budget.
+    for (const polled of polledPerSlot) {
+      expect(polled.length).toBeGreaterThan(0);
+      expect(polled.length).toBeLessThan(63);
+      expect(polled.length).toBeLessThanOrEqual(MAX_FETCHES_PER_INVOCATION);
+    }
+    // Shards are disjoint and the rotation covers every company exactly once.
+    const all = polledPerSlot.flat();
+    expect(new Set(all).size).toBe(63);
+    expect(all).toHaveLength(63);
+    for (let a = 0; a < polledPerSlot.length; a++) {
+      for (let b = a + 1; b < polledPerSlot.length; b++) {
+        for (const id of polledPerSlot[a]!) expect(polledPerSlot[b]).not.toContain(id);
+      }
+    }
   });
 
   it("scales to the Phase-1 target (160+ companies, no bucket over the fetch cap)", async () => {

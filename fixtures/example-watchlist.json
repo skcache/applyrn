@@ -6,7 +6,7 @@
     "provider": "greenhouse",
     "boardKey": "exampleai",
     "enabled": true,
-    "pollIntervalSeconds": 120,
+    "pollIntervalSeconds": 3600,
     "tags": ["fixture"],
     "createdAt": "2026-08-14T00:00:00Z"
   },
@@ -17,7 +17,7 @@
     "provider": "greenhouse",
     "boardKey": "infraco",
     "enabled": true,
-    "pollIntervalSeconds": 120,
+    "pollIntervalSeconds": 3600,
     "tags": ["fixture"],
     "createdAt": "2026-08-14T00:00:00Z"
   }

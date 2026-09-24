@@ -7,9 +7,12 @@ name: Poll (redundant trigger)
 # watchlist keeps being polled even when the platform cron goes quiet.
 #
 # Fallback semantics: each run first checks /api/status.lastPollAt. If a
-# cycle completed recently (the primary Cloudflare cron is healthy), the
-# run stands down. Only when cycles are stale does it poll the watchlist,
-# so the two triggers never overlap and double-fire the same companies.
+# cycle completed recently (the primary Cloudflare cron is healthy — it
+# fires every 12 minutes and every firing writes a heartbeat row), the run
+# stands down. Only when cycles are stale (> 30 minutes: two-plus missed
+# firings) does it poll the watchlist, so the triggers never overlap and
+# double-fire the same companies. The 30-minute threshold mirrors
+# TICK_STALENESS_SECONDS in apps/worker/src/index.ts.
 #
 # Coverage math: the worker shards the watchlist (free-plan subrequest
 # cap), so each /api/poll call covers one shard. The number of shards grows
@@ -53,7 +56,7 @@ jobs:
           else
             AGE=$((NOW - $(date -u -d "$LAST" +%s)))
             echo "last poll age: ${AGE}s; shards: ${SHARD_LIST}"
-            if [ "$AGE" -gt 180 ]; then
+            if [ "$AGE" -gt 1800 ]; then
               echo "stale=true" >> "$GITHUB_OUTPUT"
             else
               echo "stale=false" >> "$GITHUB_OUTPUT"

@@ -150,4 +150,10 @@ export type NotificationRecord = {
   errorCode?: string;
 };
 
-export const DEFAULT_POLL_INTERVAL_SECONDS = 120;
+/**
+ * Per-company poll interval floor, in seconds (cadence change 2026-09-23:
+ * hourly, previously 120s). Used as the display/default when no company
+ * carries an explicit value; seeds and the 0010 migration set 3600 for
+ * every watched company.
+ */
+export const DEFAULT_POLL_INTERVAL_SECONDS = 3600;

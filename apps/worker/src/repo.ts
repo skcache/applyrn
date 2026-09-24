@@ -1198,8 +1198,9 @@ export class D1Repository {
 
   /**
    * Audit 2026-08-22 W7: retention sweep. D1 has no scheduled SQL and the
-   * free tier has no cron for it, so the 1-minute worker cron is the only
-   * $0 lever. Bounds: poll_metrics 14 days (heartbeat + soak evidence),
+   * free tier has no cron for it, so the worker cron is the only $0 lever
+   * (runs on each firing — every 12 minutes since the 2026-09-23 cadence
+   * change). Bounds: poll_metrics 14 days (heartbeat + soak evidence),
    * terminal notifications (delivered or expired) 30 days, inactive jobs
    * 90 days. Called once per cron cycle; cheap indexed deletes that no-op
    * when there is nothing to prune.
